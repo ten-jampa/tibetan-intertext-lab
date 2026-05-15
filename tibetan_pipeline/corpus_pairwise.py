@@ -74,6 +74,8 @@ def run_corpus_pairwise_similarity(
     low_cpu_mem_usage: bool | None = None,
     top_k: int = 100,
     glob_pattern: str = "*.txt",
+    limit_a: int | None = None,
+    limit_b: int | None = None,
 ) -> dict[str, Path]:
     """Run all cross-folder document-pair comparisons with reusable embeddings."""
     output_dir = Path(output_dir)
@@ -100,6 +102,7 @@ def run_corpus_pairwise_similarity(
         side_prefix="A",
         sdk=sdk,
         glob_pattern=glob_pattern,
+        limit=limit_a,
         is_query=True,
     )
     docs_b = _prepare_documents(
@@ -108,6 +111,7 @@ def run_corpus_pairwise_similarity(
         side_prefix="B",
         sdk=sdk,
         glob_pattern=glob_pattern,
+        limit=limit_b,
         is_query=False,
     )
 
@@ -144,6 +148,8 @@ def run_corpus_pairwise_similarity(
         batch_size=batch_size,
         top_k=top_k,
         glob_pattern=glob_pattern,
+        limit_a=limit_a,
+        limit_b=limit_b,
         doc_count_a=len(docs_a),
         doc_count_b=len(docs_b),
         pair_count=len(summary_rows),
@@ -167,6 +173,7 @@ def _prepare_documents(
     side_prefix: str,
     sdk: TibetanResearchSDK,
     glob_pattern: str,
+    limit: int | None,
     is_query: bool,
 ) -> list[CorpusDocument]:
     if not root_dir.exists():
@@ -175,6 +182,10 @@ def _prepare_documents(
         raise NotADirectoryError(f"Input path is not a directory: {root_dir}")
 
     files = sorted(path for path in root_dir.rglob(glob_pattern) if path.is_file())
+    if limit is not None:
+        if limit < 0:
+            raise ValueError("Document limit must be non-negative.")
+        files = files[:limit]
     if not files:
         raise ValueError(f"No files matched pattern {glob_pattern!r} under {root_dir}")
 
@@ -428,6 +439,8 @@ def _write_corpus_manifest(
     batch_size: int,
     top_k: int,
     glob_pattern: str,
+    limit_a: int | None,
+    limit_b: int | None,
     doc_count_a: int,
     doc_count_b: int,
     pair_count: int,
@@ -446,6 +459,8 @@ def _write_corpus_manifest(
         "top_k": top_k,
         "top_k_note": "initial top-k files are generated views; each pair directory can regenerate arbitrary k from matrix and sentence indexes",
         "glob_pattern": glob_pattern,
+        "limit_a": limit_a,
+        "limit_b": limit_b,
         "doc_count_a": doc_count_a,
         "doc_count_b": doc_count_b,
         "pair_count": pair_count,

@@ -128,6 +128,8 @@ class CorpusPairwiseTests(unittest.TestCase):
             self.assertEqual(manifest["doc_count_a"], 2)
             self.assertEqual(manifest["doc_count_b"], 2)
             self.assertEqual(manifest["pair_count"], 4)
+            self.assertIsNone(manifest["limit_a"])
+            self.assertIsNone(manifest["limit_b"])
             self.assertIn("generated views", manifest["top_k_note"])
 
             with Path(artifacts["summary_csv"]).open(encoding="utf-8", newline="") as handle:
@@ -152,6 +154,38 @@ class CorpusPairwiseTests(unittest.TestCase):
             self.assertEqual(len(rows), 3)
             self.assertEqual(rows[0]["sentence_a"], "alpha")
             self.assertEqual(rows[0]["sentence_b"], "alpha")
+
+    def test_corpus_workflow_supports_smoke_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dir_a = root / "a"
+            dir_b = root / "b"
+            out = root / "out"
+            dir_a.mkdir()
+            dir_b.mkdir()
+            (dir_a / "a1.txt").write_text("alpha", encoding="utf-8")
+            (dir_a / "a2.txt").write_text("beta", encoding="utf-8")
+            (dir_b / "b1.txt").write_text("shared", encoding="utf-8")
+            (dir_b / "b2.txt").write_text("gamma", encoding="utf-8")
+
+            with patch("tibetan_pipeline.corpus_pairwise.TibetanResearchSDK", FakeSDK):
+                artifacts = run_corpus_pairwise_similarity(
+                    dir_a=dir_a,
+                    dir_b=dir_b,
+                    output_dir=out,
+                    model_id="fake/model",
+                    device="cpu",
+                    top_k=1,
+                    limit_a=1,
+                    limit_b=1,
+                )
+
+            manifest = json.loads(Path(artifacts["manifest_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(manifest["doc_count_a"], 1)
+            self.assertEqual(manifest["doc_count_b"], 1)
+            self.assertEqual(manifest["pair_count"], 1)
+            self.assertEqual(manifest["limit_a"], 1)
+            self.assertEqual(manifest["limit_b"], 1)
 
 
 def _embedding_for(sentence: str) -> list[float]:

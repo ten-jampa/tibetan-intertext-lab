@@ -83,7 +83,43 @@ Manifest notes:
 - includes aggregate matrix metrics such as `max_score`, `p95_score`, `mean_best_a_to_b`, and `mean_best_b_to_a`
 - these metrics now come from the canonical pairwise core used by the script, SDK, and corpus workflow
 
-### 3) Corpus-level pairwise workflow (Python API for now)
+### 3) Corpus-level pairwise workflow
+
+CLI:
+```bash
+uv run python scripts/run_corpus_pairwise_similarity.py \
+  --dir-a path/to/corpus_a \
+  --dir-b path/to/corpus_b \
+  --output-dir output/corpus_pairwise_run \
+  --engine botok_ours \
+  --input-format unicode \
+  --device cuda \
+  --torch-dtype bfloat16 \
+  --batch-size 1 \
+  --top-k 100 \
+  --embedding-progress batch
+```
+
+Before spending GPU time, inspect the selected file counts:
+```bash
+uv run python scripts/run_corpus_pairwise_similarity.py \
+  --dir-a path/to/corpus_a \
+  --dir-b path/to/corpus_b \
+  --output-dir output/corpus_pairwise_run \
+  --dry-run
+```
+
+For a tiny smoke run:
+```bash
+uv run python scripts/run_corpus_pairwise_similarity.py \
+  --dir-a path/to/corpus_a \
+  --dir-b path/to/corpus_b \
+  --output-dir output/corpus_pairwise_smoke \
+  --limit-a 2 \
+  --limit-b 2
+```
+
+Python API:
 ```python
 from tibetan_pipeline.corpus_pairwise import run_corpus_pairwise_similarity
 
