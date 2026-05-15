@@ -159,6 +159,14 @@ uv run python scripts/export_pair_topk.py \
   --k 250
 ```
 
+Generate a local interactive report for a completed corpus run:
+```bash
+uv run python scripts/generate_corpus_pairwise_report.py \
+  --run-dir output/corpus_pairwise_run
+```
+
+The report writes `report/index.html` and `report/report_data.js` under the run directory. It includes run metrics, document embedding metadata, a corpus-level heatmap, per-pair downsampled sentence heatmaps, and interactive top-k match browsing.
+
 ## Notebook SDK
 `TibetanResearchSDK` supports segmentation, embeddings, and pairwise analysis in Jupyter.
 
