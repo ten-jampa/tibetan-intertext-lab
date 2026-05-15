@@ -56,6 +56,7 @@ class SDKTests(unittest.TestCase):
             torch_dtype=None,
             device_map=None,
             load_in_8bit=False,
+            low_cpu_mem_usage=None,
         )
 
         self.assertEqual(view.model_id, "fake/model")
@@ -82,6 +83,7 @@ class SDKTests(unittest.TestCase):
             torch_dtype=None,
             device_map=None,
             load_in_8bit=False,
+            low_cpu_mem_usage=None,
         )
 
     def test_embed_sentences_reuses_cached_embedder_for_same_model_load_config(self) -> None:
@@ -146,6 +148,9 @@ class SDKTests(unittest.TestCase):
         self.assertEqual(pairwise_view.segments_a, ["a0", "a1"])
         self.assertEqual(pairwise_view.segments_b, ["b0", "b1"])
         self.assertEqual(len(pairwise_view.matches), 2)
+        self.assertEqual(pairwise_view.segment_records_a[0].index, 0)
+        self.assertEqual(pairwise_view.segment_records_b[1].index, 1)
+        self.assertGreaterEqual(pairwise_view.metrics.max_score, 0.0)
 
 
 if __name__ == "__main__":

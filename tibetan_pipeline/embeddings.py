@@ -38,6 +38,7 @@ class TextEmbedder:
         torch_dtype: TorchDTypeName | None = None,
         device_map: str | dict[str, int | str] | None = None,
         load_in_8bit: bool = False,
+        low_cpu_mem_usage: bool | None = None,
     ) -> None:
         self.model_id = model_id
         self.normalize_embeddings = normalize_embeddings
@@ -49,6 +50,7 @@ class TextEmbedder:
         self.torch_dtype = torch_dtype
         self.device_map = device_map
         self.load_in_8bit = load_in_8bit
+        self.low_cpu_mem_usage = low_cpu_mem_usage
         self._backend = None
         self._tokenizer = None
         self._model = None
@@ -155,7 +157,8 @@ class TextEmbedder:
                 max_length=self.max_length,
                 return_tensors="pt",
             )
-            encoded = {key: value.to(self._device) for key, value in encoded.items()}
+            input_device = self._input_device()
+            encoded = {key: value.to(input_device) for key, value in encoded.items()}
             with torch.no_grad():
                 if self._backend == "gemma-last-token":
                     outputs = self._model(**encoded, output_hidden_states=True)
@@ -172,7 +175,7 @@ class TextEmbedder:
                     pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
             if self.normalize_embeddings:
                 pooled = torch.nn.functional.normalize(pooled, p=2, dim=1)
-            output_batches.append(pooled.cpu().numpy().astype(np.float32))
+            output_batches.append(pooled.float().cpu().numpy().astype(np.float32))
 
         return np.vstack(output_batches)
 
@@ -187,15 +190,41 @@ class TextEmbedder:
             kwargs["torch_dtype"] = _resolve_torch_dtype(self.torch_dtype)
         if self.device_map is not None:
             kwargs["device_map"] = self.device_map
+        elif self._should_direct_load_on_cuda():
+            kwargs["device_map"] = {"": self._device}
         if self.load_in_8bit:
             kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
             kwargs.setdefault("device_map", "auto")
+        if self._should_use_low_cpu_mem_usage(kwargs):
+            kwargs["low_cpu_mem_usage"] = True
         return kwargs
 
     def _move_model_to_device(self) -> None:
-        if self.device_map is not None or self.load_in_8bit:
+        if self._uses_loader_device_placement():
             return
         self._model.to(self._device)
+
+    def _uses_loader_device_placement(self) -> bool:
+        return self.device_map is not None or self.load_in_8bit or self._should_direct_load_on_cuda()
+
+    def _should_direct_load_on_cuda(self) -> bool:
+        return self._device == "cuda" and self.torch_dtype is not None and not self.load_in_8bit
+
+    def _should_use_low_cpu_mem_usage(self, load_kwargs: dict[str, Any]) -> bool:
+        if self.low_cpu_mem_usage is not None:
+            return self.low_cpu_mem_usage
+        return "device_map" in load_kwargs or self.load_in_8bit
+
+    def _input_device(self) -> str:
+        if self._model is None:
+            return self._device
+        device_map = getattr(self._model, "hf_device_map", None)
+        if not device_map:
+            return self._device
+        for device in device_map.values():
+            if device not in {"cpu", "disk"}:
+                return str(device)
+        return self._device
 
     def _log(self, level: Literal["batch", "sentence"], message: str) -> None:
         if self.embedding_progress == "off":

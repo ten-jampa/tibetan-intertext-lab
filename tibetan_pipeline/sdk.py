@@ -11,7 +11,8 @@ import pandas as pd
 
 from .embeddings import DEFAULT_MODEL_ID, TextEmbedder, TorchDTypeName
 from .normalization import normalize_text
-from .pairwise import PairMatch, cosine_similarity_matrix, global_top_k_matches
+from .pairwise import PairMatch
+from .pairwise_run import PairwiseMetrics, PairwiseSegment, make_segments, run_pairwise_similarity_core
 from .pipeline import resolve_segmenter
 
 
@@ -71,8 +72,11 @@ class PairwiseView:
     device: str
     segments_a: list[str]
     segments_b: list[str]
+    segment_records_a: list[PairwiseSegment]
+    segment_records_b: list[PairwiseSegment]
     similarity_matrix: np.ndarray
     matches: list[PairMatch]
+    metrics: PairwiseMetrics
 
     def topk_dataframe(self) -> pd.DataFrame:
         return pd.DataFrame([asdict(match) for match in self.matches])
@@ -95,6 +99,7 @@ class TibetanResearchSDK:
         torch_dtype: TorchDTypeName | None = None,
         device_map: str | dict[str, int | str] | None = None,
         load_in_8bit: bool = False,
+        low_cpu_mem_usage: bool | None = None,
     ) -> None:
         self.engine = engine
         self.source_format = source_format
@@ -107,6 +112,7 @@ class TibetanResearchSDK:
         self.torch_dtype = torch_dtype
         self.device_map = device_map
         self.load_in_8bit = load_in_8bit
+        self.low_cpu_mem_usage = low_cpu_mem_usage
         self._segmenter = resolve_segmenter(
             engine=engine,
             dialect_pack_dir=botok_cache_dir,
@@ -140,6 +146,7 @@ class TibetanResearchSDK:
         torch_dtype: TorchDTypeName | None = None,
         device_map: str | dict[str, int | str] | None = None,
         load_in_8bit: bool | None = None,
+        low_cpu_mem_usage: bool | None = None,
         is_query: bool = False,
     ) -> EmbeddingView:
         model_id = model_id or self.model_id
@@ -149,6 +156,7 @@ class TibetanResearchSDK:
         torch_dtype = torch_dtype if torch_dtype is not None else self.torch_dtype
         device_map = device_map if device_map is not None else self.device_map
         load_in_8bit = load_in_8bit if load_in_8bit is not None else self.load_in_8bit
+        low_cpu_mem_usage = low_cpu_mem_usage if low_cpu_mem_usage is not None else self.low_cpu_mem_usage
         embedder = self._get_embedder(
             model_id=model_id,
             batch_size=batch_size,
@@ -157,6 +165,7 @@ class TibetanResearchSDK:
             torch_dtype=torch_dtype,
             device_map=device_map,
             load_in_8bit=load_in_8bit,
+            low_cpu_mem_usage=low_cpu_mem_usage,
         )
         encoded = embedder.encode_queries(sentences) if is_query else embedder.encode_corpus(sentences)
         return EmbeddingView(
@@ -179,6 +188,7 @@ class TibetanResearchSDK:
         torch_dtype: TorchDTypeName | None = None,
         device_map: str | dict[str, int | str] | None = None,
         load_in_8bit: bool | None = None,
+        low_cpu_mem_usage: bool | None = None,
     ) -> PairwiseView:
         sentences_a = self._segment_text_to_sentences(text_a)
         sentences_b = self._segment_text_to_sentences(text_b)
@@ -193,6 +203,7 @@ class TibetanResearchSDK:
             torch_dtype=torch_dtype,
             device_map=device_map,
             load_in_8bit=load_in_8bit,
+            low_cpu_mem_usage=low_cpu_mem_usage,
         )
 
     def pairwise_from_sentences(
@@ -208,6 +219,7 @@ class TibetanResearchSDK:
         torch_dtype: TorchDTypeName | None = None,
         device_map: str | dict[str, int | str] | None = None,
         load_in_8bit: bool | None = None,
+        low_cpu_mem_usage: bool | None = None,
     ) -> PairwiseView:
         embedding_a = self.embed_sentences(
             sentences_a,
@@ -218,6 +230,7 @@ class TibetanResearchSDK:
             torch_dtype=torch_dtype,
             device_map=device_map,
             load_in_8bit=load_in_8bit,
+            low_cpu_mem_usage=low_cpu_mem_usage,
             is_query=True,
         )
         embedding_b = self.embed_sentences(
@@ -229,17 +242,26 @@ class TibetanResearchSDK:
             torch_dtype=torch_dtype,
             device_map=device_map,
             load_in_8bit=load_in_8bit,
+            low_cpu_mem_usage=low_cpu_mem_usage,
             is_query=False,
         )
-        matrix = cosine_similarity_matrix(embedding_a.embeddings, embedding_b.embeddings)
-        matches = global_top_k_matches(matrix, sentences_a, sentences_b, top_k)
+        result = run_pairwise_similarity_core(
+            make_segments(sentences_a),
+            embedding_a.embeddings,
+            make_segments(sentences_b),
+            embedding_b.embeddings,
+            top_k=top_k,
+        )
         return PairwiseView(
             model_id=embedding_a.model_id,
             device=embedding_a.device,
             segments_a=sentences_a,
             segments_b=sentences_b,
-            similarity_matrix=matrix,
-            matches=matches,
+            segment_records_a=result.segments_a,
+            segment_records_b=result.segments_b,
+            similarity_matrix=result.similarity_matrix,
+            matches=_compatibility_matches(result),
+            metrics=result.metrics,
         )
 
     def pairwise_from_embedding_views(
@@ -258,15 +280,23 @@ class TibetanResearchSDK:
         if embedding_b.embeddings.shape[0] != len(embedding_b.sentences):
             raise ValueError("Embedding view B row count must match its sentence count.")
 
-        matrix = cosine_similarity_matrix(embedding_a.embeddings, embedding_b.embeddings)
-        matches = global_top_k_matches(matrix, embedding_a.sentences, embedding_b.sentences, top_k)
+        result = run_pairwise_similarity_core(
+            make_segments(embedding_a.sentences),
+            embedding_a.embeddings,
+            make_segments(embedding_b.sentences),
+            embedding_b.embeddings,
+            top_k=top_k,
+        )
         return PairwiseView(
             model_id=embedding_a.model_id,
             device=embedding_a.device,
             segments_a=embedding_a.sentences,
             segments_b=embedding_b.sentences,
-            similarity_matrix=matrix,
-            matches=matches,
+            segment_records_a=result.segments_a,
+            segment_records_b=result.segments_b,
+            similarity_matrix=result.similarity_matrix,
+            matches=_compatibility_matches(result),
+            metrics=result.metrics,
         )
 
     def _segment_text_to_sentences(self, text: str) -> list[str]:
@@ -283,6 +313,7 @@ class TibetanResearchSDK:
         torch_dtype: TorchDTypeName | None,
         device_map: str | dict[str, int | str] | None,
         load_in_8bit: bool,
+        low_cpu_mem_usage: bool | None,
     ) -> TextEmbedder:
         cache_key = (
             model_id,
@@ -290,6 +321,7 @@ class TibetanResearchSDK:
             torch_dtype,
             repr(device_map),
             load_in_8bit,
+            low_cpu_mem_usage,
         )
         embedder = self._embedders.get(cache_key)
         if embedder is None:
@@ -302,9 +334,24 @@ class TibetanResearchSDK:
                 torch_dtype=torch_dtype,
                 device_map=device_map,
                 load_in_8bit=load_in_8bit,
+                low_cpu_mem_usage=low_cpu_mem_usage,
             )
             self._embedders[cache_key] = embedder
         else:
             embedder.batch_size = batch_size
             embedder.embedding_progress = embedding_progress
         return embedder
+
+
+def _compatibility_matches(result: object) -> list[PairMatch]:
+    return [
+        PairMatch(
+            rank=match.rank,
+            score=match.score,
+            i=match.segment_a.index,
+            j=match.segment_b.index,
+            sentence_a=match.segment_a.text,
+            sentence_b=match.segment_b.text,
+        )
+        for match in result.matches
+    ]

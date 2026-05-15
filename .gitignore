@@ -99,6 +99,7 @@ ipython_config.py
 #   This is especially recommended for binary packages to ensure reproducibility, and is more
 #   commonly ignored for libraries.
 #uv.lock
+.worktrees/
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
@@ -216,3 +217,14 @@ data/*.parquet
 output/
 checkpoints/
 .cache/
+tbc-directories/
+eval-packs/
+research-docs/
+
+# Local planning notes
+tasks/todo.md
+tasks/lessons.md
+
+# Local/cloud-run analysis notes may include account-specific details.
+docs/analysis/
+docs/ops/

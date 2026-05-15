@@ -69,8 +69,50 @@ class EmbeddingDeviceTests(unittest.TestCase):
             trust_remote_code=True,
             torch_dtype=torch.float16,
             device_map="auto",
+            low_cpu_mem_usage=True,
         )
         mock_model_cls.from_pretrained.return_value.to.assert_not_called()
+
+    def test_cuda_dtype_loads_directly_to_cuda_with_low_cpu_mem_usage(self) -> None:
+        with patch("torch.cuda.is_available", return_value=True):
+            with patch("tibetan_pipeline.embeddings.AutoTokenizer") as mock_tokenizer_cls:
+                with patch("tibetan_pipeline.embeddings.AutoModelForCausalLM") as mock_model_cls:
+                    mock_tokenizer = mock_tokenizer_cls.from_pretrained.return_value
+                    mock_tokenizer.pad_token = "<pad>"
+                    mock_tokenizer.eos_token = "</s>"
+                    embedder = TextEmbedder(
+                        model_id=DEFAULT_MODEL_ID,
+                        device="cuda",
+                        torch_dtype="bfloat16",
+                    )
+                    embedder._ensure_backend()
+
+        mock_model_cls.from_pretrained.assert_called_once_with(
+            DEFAULT_MODEL_ID,
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+            device_map={"": "cuda"},
+            low_cpu_mem_usage=True,
+        )
+        mock_model_cls.from_pretrained.return_value.to.assert_not_called()
+
+    def test_low_cpu_mem_usage_can_be_disabled_explicitly(self) -> None:
+        with patch("torch.cuda.is_available", return_value=True):
+            embedder = TextEmbedder(
+                model_id=DEFAULT_MODEL_ID,
+                device="cuda",
+                torch_dtype="bfloat16",
+                low_cpu_mem_usage=False,
+            )
+
+        self.assertEqual(
+            embedder._model_load_kwargs(trust_remote_code=True),
+            {
+                "trust_remote_code": True,
+                "torch_dtype": torch.bfloat16,
+                "device_map": {"": "cuda"},
+            },
+        )
 
     def test_8bit_loading_uses_quantization_config_without_to_device(self) -> None:
         with patch("tibetan_pipeline.embeddings.AutoTokenizer") as mock_tokenizer_cls:
@@ -92,8 +134,17 @@ class EmbeddingDeviceTests(unittest.TestCase):
             trust_remote_code=True,
             quantization_config=mock_bnb_cls.return_value,
             device_map="auto",
+            low_cpu_mem_usage=True,
         )
         mock_model_cls.from_pretrained.return_value.to.assert_not_called()
+
+    def test_input_device_uses_first_non_cpu_device_from_model_map(self) -> None:
+        embedder = TextEmbedder(model_id=DEFAULT_MODEL_ID, device="cpu")
+        model = type("FakeModel", (), {})()
+        model.hf_device_map = {"layer0": "cpu", "layer1": "cuda:0"}
+        embedder._model = model
+
+        self.assertEqual(embedder._input_device(), "cuda:0")
 
 
 if __name__ == "__main__":

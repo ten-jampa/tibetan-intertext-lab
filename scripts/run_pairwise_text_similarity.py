@@ -32,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-id", default=DEFAULT_MODEL_ID)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "mps", "cuda"])
+    parser.add_argument("--torch-dtype", choices=["auto", "float16", "bfloat16", "float32"])
+    parser.add_argument("--device-map", help="Transformers device_map value, for example 'auto'.")
+    parser.add_argument("--load-in-8bit", action="store_true")
+    parser.add_argument("--low-cpu-mem-usage", action="store_true")
     parser.add_argument(
         "--embedding-progress",
         default="off",
@@ -61,6 +65,10 @@ def main(argv: list[str] | None = None) -> int:
         batch_size=args.batch_size,
         device=args.device,
         embedding_progress=args.embedding_progress,
+        torch_dtype=args.torch_dtype,
+        device_map=args.device_map,
+        load_in_8bit=args.load_in_8bit,
+        low_cpu_mem_usage=args.low_cpu_mem_usage or None,
         top_k=args.top_k,
         save_similarity_npy=args.save_similarity_npy,
     )

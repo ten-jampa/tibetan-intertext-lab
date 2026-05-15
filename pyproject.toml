@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68,<81", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embedding-model-for-tibetan"
+version = "0.1.0"
+description = "Tibetan segmentation, embedding, and pairwise similarity workflows."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "accelerate",
+    "botok",
+    "huggingface-hub",
+    "numpy",
+    "pandas",
+    "pyewts",
+    "sentence-transformers>=2.2.0",
+    "setuptools<81",
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "wheel",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "ipykernel",
+    "jupyterlab",
+]
+viz = [
+    "matplotlib",
+    "plotly",
+    "seaborn",
+]
+
+[tool.setuptools.packages.find]
+include = ["tibetan_pipeline*", "intellexus_engine_code*"]
+
+[tool.uv]
+no-build-isolation-package = ["pyewts"]

@@ -10,9 +10,17 @@ from typing import Literal
 
 import numpy as np
 
-from .embeddings import DEFAULT_MODEL_ID, TextEmbedder
+from .embeddings import DEFAULT_MODEL_ID, TextEmbedder, TorchDTypeName
 from .normalization import normalize_text
 from .pipeline import resolve_segmenter
+from .pairwise_run import (
+    PairwiseMetrics,
+    PairwiseRunResult,
+    cosine_similarity_matrix as core_cosine_similarity_matrix,
+    make_segments,
+    run_pairwise_similarity_core,
+    top_k_match_records,
+)
 
 
 @dataclass(slots=True)
@@ -47,6 +55,11 @@ class PairwiseResult:
     similarity_matrix: np.ndarray
 
 
+def cosine_similarity_matrix(embeddings_a: np.ndarray, embeddings_b: np.ndarray) -> np.ndarray:
+    """Compatibility wrapper around canonical cosine similarity logic."""
+    return core_cosine_similarity_matrix(embeddings_a, embeddings_b)
+
+
 def segment_text_to_sentences(
     text: str,
     engine: str = "botok_ours",
@@ -65,20 +78,6 @@ def segment_text_to_sentences(
     return [segment.text for segment in segmented if segment.text.strip()]
 
 
-def cosine_similarity_matrix(embeddings_a: np.ndarray, embeddings_b: np.ndarray) -> np.ndarray:
-    """Compute cosine similarity matrix with shape [len(A), len(B)]."""
-    if embeddings_a.ndim != 2 or embeddings_b.ndim != 2:
-        raise ValueError("Embeddings must be rank-2 arrays.")
-    if embeddings_a.shape[1] != embeddings_b.shape[1]:
-        raise ValueError("Embedding dimensions must match.")
-    if embeddings_a.shape[0] == 0 or embeddings_b.shape[0] == 0:
-        return np.empty((embeddings_a.shape[0], embeddings_b.shape[0]), dtype=np.float32)
-
-    a_norm = _row_normalize(embeddings_a)
-    b_norm = _row_normalize(embeddings_b)
-    return (a_norm @ b_norm.T).astype(np.float32)
-
-
 def global_top_k_matches(
     matrix: np.ndarray,
     sentences_a: list[str],
@@ -86,41 +85,18 @@ def global_top_k_matches(
     k: int,
 ) -> list[PairMatch]:
     """Return globally highest-scoring i,j sentence pairs."""
-    if matrix.ndim != 2:
-        raise ValueError("Similarity matrix must be rank-2.")
-    if matrix.shape != (len(sentences_a), len(sentences_b)):
-        raise ValueError("Matrix shape must match sentence list lengths.")
-    if k <= 0 or matrix.size == 0:
-        return []
-
-    flat = matrix.ravel()
-    k_eff = min(k, flat.size)
-    if k_eff == flat.size:
-        top_indices = np.argsort(flat)
-    else:
-        top_indices = np.argpartition(flat, -k_eff)[-k_eff:]
-
-    # Stable deterministic order: score desc, then i asc, then j asc.
-    ordered = sorted(
-        top_indices.tolist(),
-        key=lambda idx: (-float(flat[idx]), idx // matrix.shape[1], idx % matrix.shape[1]),
-    )
-
-    matches: list[PairMatch] = []
-    for rank, flat_idx in enumerate(ordered, start=1):
-        i = flat_idx // matrix.shape[1]
-        j = flat_idx % matrix.shape[1]
-        matches.append(
-            PairMatch(
-                rank=rank,
-                score=float(matrix[i, j]),
-                i=i,
-                j=j,
-                sentence_a=sentences_a[i],
-                sentence_b=sentences_b[j],
-            )
+    match_records = top_k_match_records(matrix, make_segments(sentences_a), make_segments(sentences_b), k)
+    return [
+        PairMatch(
+            rank=match.rank,
+            score=match.score,
+            i=match.segment_a.index,
+            j=match.segment_b.index,
+            sentence_a=match.segment_a.text,
+            sentence_b=match.segment_b.text,
         )
-    return matches
+        for match in match_records
+    ]
 
 
 def run_pairwise_similarity(
@@ -136,6 +112,10 @@ def run_pairwise_similarity(
     batch_size: int = 8,
     device: str = "auto",
     embedding_progress: Literal["off", "batch", "sentence"] = "off",
+    torch_dtype: TorchDTypeName | None = None,
+    device_map: str | dict[str, int | str] | None = None,
+    load_in_8bit: bool = False,
+    low_cpu_mem_usage: bool | None = None,
     top_k: int = 100,
     save_similarity_npy: bool = False,
 ) -> PairwiseArtifacts:
@@ -161,11 +141,22 @@ def run_pairwise_similarity(
         normalize_embeddings=True,
         device=device,
         embedding_progress=embedding_progress,
+        torch_dtype=torch_dtype,
+        device_map=device_map,
+        load_in_8bit=load_in_8bit,
+        low_cpu_mem_usage=low_cpu_mem_usage,
     )
     embeddings_a = embedder.encode_queries(sentences_a).embeddings
     embeddings_b = embedder.encode_corpus(sentences_b).embeddings
-    matrix = cosine_similarity_matrix(embeddings_a, embeddings_b)
-    matches = global_top_k_matches(matrix, sentences_a, sentences_b, top_k)
+    result = run_pairwise_similarity_core(
+        make_segments(sentences_a),
+        embeddings_a,
+        make_segments(sentences_b),
+        embeddings_b,
+        top_k=top_k,
+    )
+    matrix = result.similarity_matrix
+    matches = _compatibility_matches(result)
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -192,6 +183,12 @@ def run_pairwise_similarity(
         "segment_count_a": len(sentences_a),
         "segment_count_b": len(sentences_b),
         "matrix_shape": list(matrix.shape),
+        "max_score": result.metrics.max_score,
+        "mean_score": result.metrics.mean_score,
+        "median_score": result.metrics.median_score,
+        "p95_score": result.metrics.p95_score,
+        "mean_best_a_to_b": result.metrics.mean_best_a_to_b,
+        "mean_best_b_to_a": result.metrics.mean_best_b_to_a,
         "topk_csv": str(topk_csv),
         "topk_jsonl": str(topk_jsonl),
         "similarity_npy": str(similarity_npy) if similarity_npy else None,
@@ -230,7 +227,15 @@ def write_topk_jsonl(matches: list[PairMatch], output_path: str | Path) -> Path:
     return output_path
 
 
-def _row_normalize(embeddings: np.ndarray) -> np.ndarray:
-    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    norms = np.clip(norms, a_min=1e-12, a_max=None)
-    return embeddings / norms
+def _compatibility_matches(result: PairwiseRunResult) -> list[PairMatch]:
+    return [
+        PairMatch(
+            rank=match.rank,
+            score=match.score,
+            i=match.segment_a.index,
+            j=match.segment_b.index,
+            sentence_a=match.segment_a.text,
+            sentence_b=match.segment_b.text,
+        )
+        for match in result.matches
+    ]

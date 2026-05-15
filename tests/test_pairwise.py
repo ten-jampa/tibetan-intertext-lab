@@ -62,8 +62,8 @@ class PairwiseTests(unittest.TestCase):
                             text_b="unused-b",
                             output_dir=temp_dir,
                             model_id="fake/model",
-                        top_k=4,
-                    )
+                            top_k=4,
+                        )
 
             self.assertTrue(artifacts.topk_csv.exists())
             self.assertTrue(artifacts.topk_jsonl.exists())
@@ -88,6 +88,8 @@ class PairwiseTests(unittest.TestCase):
             self.assertEqual(manifest["segment_count_b"], 3)
             self.assertEqual(manifest["top_k_requested"], 4)
             self.assertEqual(manifest["top_k_returned"], 4)
+            self.assertIn("max_score", manifest)
+            self.assertIn("mean_best_a_to_b", manifest)
 
     def test_run_pairwise_similarity_passes_device_to_embedder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -111,6 +113,10 @@ class PairwiseTests(unittest.TestCase):
                 normalize_embeddings=True,
                 device="cpu",
                 embedding_progress="off",
+                torch_dtype=None,
+                device_map=None,
+                load_in_8bit=False,
+                low_cpu_mem_usage=None,
             )
 
 
