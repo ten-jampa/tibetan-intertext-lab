@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from tibetan_pipeline.corpus_pairwise import run_corpus_pairwise_similarity
+from tibetan_pipeline.corpus_pairwise import regenerate_topk_for_pair_dir, run_corpus_pairwise_similarity
 from tibetan_pipeline.pairwise import PairMatch
 from tibetan_pipeline.pairwise_run import make_segments, run_pairwise_similarity_core
 from tibetan_pipeline.sdk import EmbeddingView, PairwiseView, SegmentationView
@@ -128,12 +128,30 @@ class CorpusPairwiseTests(unittest.TestCase):
             self.assertEqual(manifest["doc_count_a"], 2)
             self.assertEqual(manifest["doc_count_b"], 2)
             self.assertEqual(manifest["pair_count"], 4)
+            self.assertIn("generated views", manifest["top_k_note"])
 
             with Path(artifacts["summary_csv"]).open(encoding="utf-8", newline="") as handle:
                 summary_rows = list(csv.DictReader(handle))
             self.assertEqual(len(summary_rows), 4)
             self.assertTrue(all(row["similarity_npy"] for row in summary_rows))
             self.assertTrue(all(Path(row["topk_csv"]).exists() for row in summary_rows))
+
+            pair_dir = out / "pairs" / "A001__B002"
+            pair_manifest = json.loads((pair_dir / "pair_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(pair_manifest["top_k_requested"], 2)
+            self.assertIn("regenerate any k", pair_manifest["top_k_note"])
+
+            regenerated = regenerate_topk_for_pair_dir(pair_dir, k=3)
+            self.assertEqual(regenerated.k, 3)
+            self.assertEqual(regenerated.match_count, 3)
+            self.assertTrue(regenerated.topk_csv.exists())
+            self.assertTrue(regenerated.topk_jsonl.exists())
+
+            with regenerated.topk_csv.open(encoding="utf-8", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[0]["sentence_a"], "alpha")
+            self.assertEqual(rows[0]["sentence_b"], "alpha")
 
 
 def _embedding_for(sentence: str) -> list[float]:

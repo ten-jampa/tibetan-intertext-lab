@@ -105,7 +105,19 @@ Corpus outputs:
 - `document_pair_summary.csv`
 - `corpus_manifest.json`
 
-Sentence index files in the corpus workflow include `sentence_index`, `sentence_text`, `start`, and `end` so later audit or UI layers can map scores back to source spans.
+Each pair directory includes:
+- `sentences_a.csv` and `sentences_b.csv` with `sentence_index`, `sentence_text`, `start`, and `end`
+- `similarity_matrix.npy`, the full durable score matrix
+- `topk_pairs.csv` and `topk_pairs.jsonl`, generated convenience views
+- `pair_manifest.json`, with artifact paths and aggregate matrix metrics
+
+The initial `top_k` is not a hard analytical limit. Because the full matrix and sentence indexes are stored, you can regenerate any later top-k view without re-segmenting or re-embedding:
+
+```bash
+uv run python scripts/export_pair_topk.py \
+  --pair-dir output/corpus_pairwise_run/pairs/A001__B001 \
+  --k 250
+```
 
 ## Notebook SDK
 `TibetanResearchSDK` supports segmentation, embeddings, and pairwise analysis in Jupyter.

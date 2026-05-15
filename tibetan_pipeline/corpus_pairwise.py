@@ -12,8 +12,8 @@ from typing import Literal
 import numpy as np
 
 from .embeddings import DEFAULT_MODEL_ID, TorchDTypeName
-from .pairwise import write_topk_csv, write_topk_jsonl
-from .pairwise_run import PairwiseSegment, make_segments
+from .pairwise import PairMatch, write_topk_csv, write_topk_jsonl
+from .pairwise_run import PairwiseSegment, make_segments, top_k_match_records
 from .sdk import EmbeddingView, TibetanResearchSDK
 
 
@@ -43,6 +43,16 @@ class CorpusPairArtifacts:
     topk_jsonl: Path
     similarity_npy: Path
     manifest_json: Path
+
+
+@dataclass(slots=True)
+class TopKExportArtifacts:
+    """Artifacts regenerated from a saved pairwise matrix and sentence indexes."""
+
+    topk_csv: Path
+    topk_jsonl: Path
+    k: int
+    match_count: int
 
 
 def run_corpus_pairwise_similarity(
@@ -243,7 +253,9 @@ def _write_pair_artifacts(
         "p95_score": pairwise_view.metrics.p95_score,
         "mean_best_a_to_b": pairwise_view.metrics.mean_best_a_to_b,
         "mean_best_b_to_a": pairwise_view.metrics.mean_best_b_to_a,
+        "top_k_requested": top_k,
         "top_k_returned": len(pairwise_view.matches),
+        "top_k_note": "top-k files are a generated view; regenerate any k from similarity_npy plus sentence indexes",
         "sentences_a_csv": str(sentences_a_csv),
         "sentences_b_csv": str(sentences_b_csv),
         "topk_csv": str(topk_csv),
@@ -265,6 +277,72 @@ def _write_pair_artifacts(
         similarity_npy=similarity_npy,
         manifest_json=manifest_json,
     )
+
+
+def regenerate_topk_for_pair_dir(
+    pair_dir: str | Path,
+    *,
+    k: int,
+    output_stem: str | None = None,
+) -> TopKExportArtifacts:
+    """Regenerate top-k match tables for any k from a saved corpus pair directory.
+
+    The full `similarity_matrix.npy` is the durable evidence artifact. The CSV/JSONL
+    top-k files are convenience views over that matrix and can be regenerated later
+    without re-segmenting or re-embedding.
+    """
+    pair_dir = Path(pair_dir)
+    manifest_path = pair_dir / "pair_manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Missing pair manifest: {manifest_path}")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    matrix_path = _resolve_artifact_path(pair_dir, manifest["similarity_npy"])
+    sentences_a_path = _resolve_artifact_path(pair_dir, manifest["sentences_a_csv"])
+    sentences_b_path = _resolve_artifact_path(pair_dir, manifest["sentences_b_csv"])
+
+    matrix = np.load(matrix_path)
+    segments_a = read_sentence_index_csv(sentences_a_path)
+    segments_b = read_sentence_index_csv(sentences_b_path)
+    match_records = top_k_match_records(matrix, segments_a, segments_b, k)
+    matches = [
+        PairMatch(
+            rank=match.rank,
+            score=match.score,
+            i=match.segment_a.index,
+            j=match.segment_b.index,
+            sentence_a=match.segment_a.text,
+            sentence_b=match.segment_b.text,
+        )
+        for match in match_records
+    ]
+
+    stem = output_stem or f"topk_{k}"
+    topk_csv = write_topk_csv(matches, pair_dir / f"{stem}.csv")
+    topk_jsonl = write_topk_jsonl(matches, pair_dir / f"{stem}.jsonl")
+    return TopKExportArtifacts(
+        topk_csv=topk_csv,
+        topk_jsonl=topk_jsonl,
+        k=k,
+        match_count=len(matches),
+    )
+
+
+def read_sentence_index_csv(path: str | Path) -> list[PairwiseSegment]:
+    """Read sentence-index artifacts back into pairwise segment records."""
+    segments: list[PairwiseSegment] = []
+    with Path(path).open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            segments.append(
+                PairwiseSegment(
+                    index=int(row["sentence_index"]),
+                    text=row["sentence_text"],
+                    start=_optional_int(row.get("start")),
+                    end=_optional_int(row.get("end")),
+                )
+            )
+    return segments
 
 
 def _write_sentence_index_csv(segments: list[PairwiseSegment], output_path: Path) -> Path:
@@ -321,7 +399,9 @@ def _write_summary_csv(summary_rows: list[dict[str, object]], output_path: Path)
         "p95_score",
         "mean_best_a_to_b",
         "mean_best_b_to_a",
+        "top_k_requested",
         "top_k_returned",
+        "top_k_note",
         "sentences_a_csv",
         "sentences_b_csv",
         "topk_csv",
@@ -364,6 +444,7 @@ def _write_corpus_manifest(
         "device": device,
         "batch_size": batch_size,
         "top_k": top_k,
+        "top_k_note": "initial top-k files are generated views; each pair directory can regenerate arbitrary k from matrix and sentence indexes",
         "glob_pattern": glob_pattern,
         "doc_count_a": doc_count_a,
         "doc_count_b": doc_count_b,
@@ -374,6 +455,21 @@ def _write_corpus_manifest(
     }
     output_dir.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return output_dir
+
+
+def _resolve_artifact_path(pair_dir: Path, value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    if path.exists():
+        return path
+    return pair_dir / path.name
+
+
+def _optional_int(value: str | None) -> int | None:
+    if value in {None, ""}:
+        return None
+    return int(value)
 
 
 def safe_slug(value: str) -> str:
