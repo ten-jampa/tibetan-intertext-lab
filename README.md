@@ -159,13 +159,27 @@ uv run python scripts/export_pair_topk.py \
   --k 250
 ```
 
+Use `--mode` to choose how repeated sentence matches are handled:
+- `raw`: global top-k matrix cells; allows repeated A and B sentences
+- `unique_a`: each A sentence appears at most once
+- `unique_b`: each B sentence appears at most once
+- `unique_both`: greedy one-to-one sentence matches
+- `diverse_both`: one-to-one matches with nearby sentence-index clumps suppressed
+
+```bash
+uv run python scripts/export_pair_topk.py \
+  --pair-dir output/corpus_pairwise_run/pairs/A001__B001 \
+  --k 100 \
+  --mode unique_both
+```
+
 Generate a local interactive report for a completed corpus run:
 ```bash
 uv run python scripts/generate_corpus_pairwise_report.py \
   --run-dir output/corpus_pairwise_run
 ```
 
-The report writes `report/index.html` and `report/report_data.js` under the run directory. It includes run metrics, document embedding metadata, a corpus-level heatmap, per-pair downsampled sentence heatmaps, and interactive top-k match browsing.
+The report writes `report/index.html` and `report/report_data.js` under the run directory. It includes run metrics, document embedding metadata, a corpus-level heatmap, per-pair downsampled sentence heatmaps, and interactive top-k match browsing across the same raw/unique/diverse modes.
 
 ## Notebook SDK
 `TibetanResearchSDK` supports segmentation, embeddings, and pairwise analysis in Jupyter.

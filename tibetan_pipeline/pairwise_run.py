@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
+
+TopKMode = Literal["raw", "unique_a", "unique_b", "unique_both", "diverse_both"]
 
 
 @dataclass(slots=True)
@@ -91,29 +94,34 @@ def top_k_match_records(
     segments_a: list[PairwiseSegment],
     segments_b: list[PairwiseSegment],
     k: int,
+    *,
+    mode: TopKMode = "raw",
+    diversity_radius: int = 2,
 ) -> list[PairwiseMatchRecord]:
-    """Return globally highest-scoring segment pairs."""
+    """Return high-scoring segment pairs using the requested ranking mode."""
     if matrix.ndim != 2:
         raise ValueError("Similarity matrix must be rank-2.")
     if matrix.shape != (len(segments_a), len(segments_b)):
         raise ValueError("Matrix shape must match segment list lengths.")
     if k <= 0 or matrix.size == 0:
         return []
+    if mode not in {"raw", "unique_a", "unique_b", "unique_both", "diverse_both"}:
+        raise ValueError(f"Unsupported top-k mode: {mode}")
+    if diversity_radius < 0:
+        raise ValueError("diversity_radius must be non-negative.")
 
     flat = matrix.ravel()
-    k_eff = min(k, flat.size)
-    if k_eff == flat.size:
-        top_indices = np.argsort(flat)
-    else:
-        top_indices = np.argpartition(flat, -k_eff)[-k_eff:]
-
-    ordered = sorted(
-        top_indices.tolist(),
-        key=lambda idx: (-float(flat[idx]), idx // matrix.shape[1], idx % matrix.shape[1]),
+    ordered = _ordered_candidate_indices(flat, matrix.shape, k if mode == "raw" else None)
+    selected = _select_candidate_indices(
+        ordered,
+        matrix.shape,
+        k,
+        mode=mode,
+        diversity_radius=diversity_radius,
     )
 
     matches: list[PairwiseMatchRecord] = []
-    for rank, flat_idx in enumerate(ordered, start=1):
+    for rank, flat_idx in enumerate(selected, start=1):
         i = flat_idx // matrix.shape[1]
         j = flat_idx % matrix.shape[1]
         matches.append(
@@ -125,6 +133,55 @@ def top_k_match_records(
             )
         )
     return matches
+
+
+def _ordered_candidate_indices(flat: np.ndarray, shape: tuple[int, int], k: int | None) -> list[int]:
+    if k is None:
+        candidate_indices = np.argsort(flat).tolist()
+    else:
+        k_eff = min(k, flat.size)
+        if k_eff == flat.size:
+            candidate_indices = np.argsort(flat).tolist()
+        else:
+            candidate_indices = np.argpartition(flat, -k_eff)[-k_eff:].tolist()
+    return sorted(
+        candidate_indices,
+        key=lambda idx: (-float(flat[idx]), idx // shape[1], idx % shape[1]),
+    )
+
+
+def _select_candidate_indices(
+    ordered: list[int],
+    shape: tuple[int, int],
+    k: int,
+    *,
+    mode: TopKMode,
+    diversity_radius: int,
+) -> list[int]:
+    selected: list[int] = []
+    used_a: list[int] = []
+    used_b: list[int] = []
+    for flat_idx in ordered:
+        i = flat_idx // shape[1]
+        j = flat_idx % shape[1]
+        if mode in {"unique_a", "unique_both", "diverse_both"} and i in used_a:
+            continue
+        if mode in {"unique_b", "unique_both", "diverse_both"} and j in used_b:
+            continue
+        if mode == "diverse_both" and (
+            _within_radius(i, used_a, diversity_radius) or _within_radius(j, used_b, diversity_radius)
+        ):
+            continue
+        selected.append(flat_idx)
+        used_a.append(i)
+        used_b.append(j)
+        if len(selected) == k:
+            break
+    return selected
+
+
+def _within_radius(index: int, used: list[int], radius: int) -> bool:
+    return any(abs(index - existing) <= radius for existing in used)
 
 
 def matrix_metrics(matrix: np.ndarray) -> PairwiseMetrics:

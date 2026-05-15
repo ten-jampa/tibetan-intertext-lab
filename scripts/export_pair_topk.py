@@ -24,6 +24,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pair-dir", required=True, help="Path to one pairs/<pair_id>/ directory.")
     parser.add_argument("--k", required=True, type=int, help="Number of highest-scoring matches to export.")
     parser.add_argument(
+        "--mode",
+        default="raw",
+        choices=["raw", "unique_a", "unique_b", "unique_both", "diverse_both"],
+        help="Ranking mode. Defaults to raw global top-k.",
+    )
+    parser.add_argument(
+        "--diversity-radius",
+        type=int,
+        default=2,
+        help="Sentence-index exclusion radius for diverse_both mode.",
+    )
+    parser.add_argument(
         "--output-stem",
         help="Output basename without extension. Defaults to topk_<k>.",
     )
@@ -35,11 +47,14 @@ def main(argv: list[str] | None = None) -> int:
     artifacts = regenerate_topk_for_pair_dir(
         args.pair_dir,
         k=args.k,
+        mode=args.mode,
+        diversity_radius=args.diversity_radius,
         output_stem=args.output_stem,
     )
     print(f"topk_csv={artifacts.topk_csv}")
     print(f"topk_jsonl={artifacts.topk_jsonl}")
     print(f"k={artifacts.k}")
+    print(f"mode={artifacts.mode}")
     print(f"match_count={artifacts.match_count}")
     return 0
 

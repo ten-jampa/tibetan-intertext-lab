@@ -156,6 +156,7 @@ class CorpusPairwiseTests(unittest.TestCase):
 
             regenerated = regenerate_topk_for_pair_dir(pair_dir, k=3)
             self.assertEqual(regenerated.k, 3)
+            self.assertEqual(regenerated.mode, "raw")
             self.assertEqual(regenerated.match_count, 3)
             self.assertTrue(regenerated.topk_csv.exists())
             self.assertTrue(regenerated.topk_jsonl.exists())
@@ -165,6 +166,14 @@ class CorpusPairwiseTests(unittest.TestCase):
             self.assertEqual(len(rows), 3)
             self.assertEqual(rows[0]["sentence_a"], "alpha")
             self.assertEqual(rows[0]["sentence_b"], "alpha")
+
+            unique = regenerate_topk_for_pair_dir(pair_dir, k=3, mode="unique_both")
+            self.assertEqual(unique.mode, "unique_both")
+            self.assertEqual(unique.topk_csv.name, "topk_unique_both_3.csv")
+            with unique.topk_csv.open(encoding="utf-8", newline="") as handle:
+                unique_rows = list(csv.DictReader(handle))
+            self.assertEqual(len({row["i"] for row in unique_rows}), len(unique_rows))
+            self.assertEqual(len({row["j"] for row in unique_rows}), len(unique_rows))
 
     def test_corpus_workflow_supports_smoke_limits(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

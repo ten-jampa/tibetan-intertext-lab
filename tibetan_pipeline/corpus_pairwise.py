@@ -13,7 +13,7 @@ import numpy as np
 
 from .embeddings import DEFAULT_MODEL_ID, TorchDTypeName
 from .pairwise import PairMatch, write_topk_csv, write_topk_jsonl
-from .pairwise_run import PairwiseSegment, make_segments, top_k_match_records
+from .pairwise_run import PairwiseSegment, TopKMode, make_segments, top_k_match_records
 from .sdk import EmbeddingView, TibetanResearchSDK
 
 
@@ -54,6 +54,7 @@ class TopKExportArtifacts:
     topk_jsonl: Path
     k: int
     match_count: int
+    mode: TopKMode
 
 
 def run_corpus_pairwise_similarity(
@@ -298,6 +299,8 @@ def regenerate_topk_for_pair_dir(
     pair_dir: str | Path,
     *,
     k: int,
+    mode: TopKMode = "raw",
+    diversity_radius: int = 2,
     output_stem: str | None = None,
 ) -> TopKExportArtifacts:
     """Regenerate top-k match tables for any k from a saved corpus pair directory.
@@ -319,7 +322,14 @@ def regenerate_topk_for_pair_dir(
     matrix = np.load(matrix_path)
     segments_a = read_sentence_index_csv(sentences_a_path)
     segments_b = read_sentence_index_csv(sentences_b_path)
-    match_records = top_k_match_records(matrix, segments_a, segments_b, k)
+    match_records = top_k_match_records(
+        matrix,
+        segments_a,
+        segments_b,
+        k,
+        mode=mode,
+        diversity_radius=diversity_radius,
+    )
     matches = [
         PairMatch(
             rank=match.rank,
@@ -332,7 +342,7 @@ def regenerate_topk_for_pair_dir(
         for match in match_records
     ]
 
-    stem = output_stem or f"topk_{k}"
+    stem = output_stem or (f"topk_{k}" if mode == "raw" else f"topk_{mode}_{k}")
     topk_csv = write_topk_csv(matches, pair_dir / f"{stem}.csv")
     topk_jsonl = write_topk_jsonl(matches, pair_dir / f"{stem}.jsonl")
     return TopKExportArtifacts(
@@ -340,6 +350,7 @@ def regenerate_topk_for_pair_dir(
         topk_jsonl=topk_jsonl,
         k=k,
         match_count=len(matches),
+        mode=mode,
     )
 
 

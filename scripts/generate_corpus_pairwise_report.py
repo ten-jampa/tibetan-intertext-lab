@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import argparse
 import csv
-import html
 import json
-import math
 import re
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from tibetan_pipeline.pairwise_run import PairwiseMatchRecord, PairwiseSegment, top_k_match_records
+
+TOPK_MODES = ["raw", "unique_a", "unique_b", "unique_both", "diverse_both"]
 
 
 def main() -> None:
@@ -51,7 +53,21 @@ def build_report_data(run_dir: Path, heatmap_size: int, max_topk: int) -> dict[s
     for row in pairs:
         pair_dir = run_dir / "pairs" / row["pair_id"]
         matrix = np.load(pair_dir / "similarity_matrix.npy", mmap_mode="r")
-        topk_rows = read_csv(pair_dir / "topk_pairs.csv")[:max_topk]
+        segments_a = read_segments(resolve_run_path(run_dir, row["sentences_a_csv"]))
+        segments_b = read_segments(resolve_run_path(run_dir, row["sentences_b_csv"]))
+        topk_by_mode = {
+            mode: match_records_to_topk(
+                top_k_match_records(
+                    matrix,
+                    segments_a,
+                    segments_b,
+                    max_topk,
+                    mode=mode,  # type: ignore[arg-type]
+                    diversity_radius=2,
+                )
+            )
+            for mode in TOPK_MODES
+        }
         pair_payloads.append(
             {
                 "pair_id": row["pair_id"],
@@ -73,7 +89,8 @@ def build_report_data(run_dir: Path, heatmap_size: int, max_topk: int) -> dict[s
                 "top_k_returned": int(row["top_k_returned"]),
                 "similarity_npy": row["similarity_npy"],
                 "topk_csv": row["topk_csv"],
-                "topk": normalize_topk(topk_rows),
+                "topk": topk_by_mode["raw"],
+                "topk_by_mode": topk_by_mode,
                 "heatmap": downsample_matrix(matrix, heatmap_size),
             }
         )
@@ -144,6 +161,40 @@ def normalize_topk(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
             }
         )
     return normalized
+
+
+def read_segments(path: Path) -> list[PairwiseSegment]:
+    segments: list[PairwiseSegment] = []
+    for row in read_csv(path):
+        segments.append(
+            PairwiseSegment(
+                index=int(row["sentence_index"]),
+                text=row["sentence_text"],
+                start=optional_int(row.get("start")),
+                end=optional_int(row.get("end")),
+            )
+        )
+    return segments
+
+
+def optional_int(value: str | None) -> int | None:
+    if value in (None, ""):
+        return None
+    return int(value)
+
+
+def match_records_to_topk(records: list[PairwiseMatchRecord]) -> list[dict[str, Any]]:
+    return [
+        {
+            "rank": match.rank,
+            "score": round(float(match.score), 6),
+            "i": match.segment_a.index,
+            "j": match.segment_b.index,
+            "sentence_a": match.segment_a.text,
+            "sentence_b": match.segment_b.text,
+        }
+        for match in records
+    ]
 
 
 def downsample_matrix(matrix: np.ndarray, size: int) -> list[list[float]]:
@@ -296,6 +347,15 @@ def build_html() -> str:
         <label>Top K shown for selected pair
           <input id="topK" type="number" min="1" max="100" value="20">
         </label>
+        <label>Match view
+          <select id="matchMode">
+            <option value="raw">Raw top-k</option>
+            <option value="unique_a">Unique A</option>
+            <option value="unique_b">Unique B</option>
+            <option value="unique_both">Unique both</option>
+            <option value="diverse_both">Diverse both</option>
+          </select>
+        </label>
         <div class="metric-buttons">
           <button class="active" data-overview="max_score">Overview: max</button>
           <button data-overview="mean_best_a_to_b">Overview: best A→B</button>
@@ -342,6 +402,7 @@ def build_html() -> str:
     const DATA = window.CORPUS_REPORT_DATA;
     let selectedPair = DATA.pairs[0];
     let overviewMetric = 'max_score';
+    let matchMode = 'raw';
 
     const fmt = new Intl.NumberFormat('en-US');
     const score = (x) => Number(x).toFixed(3);
@@ -410,6 +471,10 @@ def build_html() -> str:
       });
       $('sortMetric').addEventListener('change', renderPairList);
       $('topK').addEventListener('input', renderMatches);
+      $('matchMode').addEventListener('change', () => {
+        matchMode = $('matchMode').value;
+        renderMatches();
+      });
       document.querySelectorAll('[data-overview]').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('[data-overview]').forEach(b => b.classList.remove('active'));
@@ -560,8 +625,15 @@ def build_html() -> str:
 
     function renderMatches() {
       const k = Math.max(1, Math.min(100, Number($('topK').value) || 20));
-      const rows = selectedPair.topk.slice(0, k);
-      $('matches').innerHTML = rows.map(m => `
+      const rows = (selectedPair.topk_by_mode?.[matchMode] || selectedPair.topk).slice(0, k);
+      const modeNotes = {
+        raw: 'Raw top-k allows repeated A and B sentence indices.',
+        unique_a: 'Unique A keeps each A sentence at most once.',
+        unique_b: 'Unique B keeps each B sentence at most once.',
+        unique_both: 'Unique both is greedy one-to-one matching.',
+        diverse_both: 'Diverse both is one-to-one and suppresses neighboring sentence clumps.'
+      };
+      $('matches').innerHTML = `<p class="note">${modeNotes[matchMode]} Showing ${rows.length} rows for ${selectedPair.pair_id}.</p>` + rows.map(m => `
         <div class="match">
           <div class="match-head">
             <span>#${m.rank} · score ${score(m.score)} · A[${m.i}] ↔ B[${m.j}]</span>
