@@ -25,6 +25,7 @@ class CorpusDocument:
     relative_path: str
     sentence_count: int
     sentences_csv: Path
+    embeddings_npy: Path
     segments: list[PairwiseSegment]
     embedding_view: EmbeddingView
 
@@ -209,12 +210,15 @@ def _prepare_documents(
             segments,
             output_dir / f"{doc_id}_sentences.csv",
         )
+        embeddings_npy = output_dir / f"{doc_id}_embeddings.npy"
+        np.save(embeddings_npy, embedding_view.embeddings.astype(np.float32, copy=False))
         documents.append(
             CorpusDocument(
                 doc_id=doc_id,
                 relative_path=relative_path,
                 sentence_count=len(sentences),
                 sentences_csv=sentences_csv,
+                embeddings_npy=embeddings_npy,
                 segments=segments,
                 embedding_view=embedding_view,
             )
@@ -377,7 +381,7 @@ def _write_document_index(documents: list[CorpusDocument], output_path: Path) ->
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["doc_id", "relative_path", "sentence_count", "sentences_csv"],
+            fieldnames=["doc_id", "relative_path", "sentence_count", "sentences_csv", "embeddings_npy"],
         )
         writer.writeheader()
         for document in documents:
@@ -387,6 +391,7 @@ def _write_document_index(documents: list[CorpusDocument], output_path: Path) ->
                     "relative_path": document.relative_path,
                     "sentence_count": document.sentence_count,
                     "sentences_csv": str(document.sentences_csv),
+                    "embeddings_npy": str(document.embeddings_npy),
                 }
             )
     return output_path

@@ -138,6 +138,17 @@ class CorpusPairwiseTests(unittest.TestCase):
             self.assertTrue(all(row["similarity_npy"] for row in summary_rows))
             self.assertTrue(all(Path(row["topk_csv"]).exists() for row in summary_rows))
 
+            with Path(artifacts["documents_a_csv"]).open(encoding="utf-8", newline="") as handle:
+                doc_a_rows = list(csv.DictReader(handle))
+            self.assertIn("embeddings_npy", doc_a_rows[0])
+            embeddings_a = np.load(doc_a_rows[0]["embeddings_npy"])
+            self.assertEqual(embeddings_a.shape, (2, 3))
+
+            with Path(artifacts["documents_b_csv"]).open(encoding="utf-8", newline="") as handle:
+                doc_b_rows = list(csv.DictReader(handle))
+            embeddings_b = np.load(doc_b_rows[0]["embeddings_npy"])
+            self.assertEqual(embeddings_b.shape, (1, 3))
+
             pair_dir = out / "pairs" / "A001__B002"
             pair_manifest = json.loads((pair_dir / "pair_manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(pair_manifest["top_k_requested"], 2)

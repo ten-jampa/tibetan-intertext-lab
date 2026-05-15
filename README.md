@@ -141,6 +141,10 @@ Corpus outputs:
 - `document_pair_summary.csv`
 - `corpus_manifest.json`
 
+Each document directory includes:
+- `<doc_id>_sentences.csv`, mapping sentence indices to text and source spans
+- `<doc_id>_embeddings.npy`, the persisted sentence embedding matrix for that document
+
 Each pair directory includes:
 - `sentences_a.csv` and `sentences_b.csv` with `sentence_index`, `sentence_text`, `start`, and `end`
 - `similarity_matrix.npy`, the full durable score matrix
