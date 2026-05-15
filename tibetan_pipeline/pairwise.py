@@ -14,7 +14,6 @@ from .embeddings import DEFAULT_MODEL_ID, TextEmbedder, TorchDTypeName
 from .normalization import normalize_text
 from .pipeline import resolve_segmenter
 from .pairwise_run import (
-    PairwiseMetrics,
     PairwiseRunResult,
     cosine_similarity_matrix as core_cosine_similarity_matrix,
     make_segments,

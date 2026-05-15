@@ -229,8 +229,18 @@ Performance notes:
 - Pairwise on long texts is dominated by embedding time, not cosine similarity time.
 
 ## Tests
+Install development tools:
+```bash
+uv sync --extra dev
+```
+
 ```bash
 uv run python -m unittest discover -s tests -v
+```
+
+Lint focused files:
+```bash
+uv run ruff check tibetan_pipeline scripts tests
 ```
 
 Focused pairwise seam tests:

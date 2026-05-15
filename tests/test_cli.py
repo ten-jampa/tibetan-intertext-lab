@@ -14,7 +14,6 @@ import numpy as np
 from scripts import run_corpus_pairwise_similarity
 from tibetan_pipeline.cli import run
 from tibetan_pipeline.embeddings import EmbeddingResult
-from tibetan_pipeline.io import InputRecord
 from tibetan_pipeline.pipeline import PipelineArtifacts
 from tibetan_pipeline.segmenters.base import BaseSegmenter, Segment
 
