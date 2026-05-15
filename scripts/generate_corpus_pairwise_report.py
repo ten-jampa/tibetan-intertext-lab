@@ -227,6 +227,13 @@ def build_html() -> str:
     button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 8px 10px; font-size: 13px; cursor: pointer; }
     button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
     .metric-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .file-browser { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; display: grid; gap: 8px; }
+    .file-browser-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .file-browser-title { font-size: 12px; color: var(--muted); font-weight: 700; }
+    .file-browser-list { display: grid; gap: 5px; max-height: 190px; overflow: auto; }
+    .file-option { text-align: left; font-size: 12px; line-height: 1.25; padding: 7px; }
+    .file-option b { display: block; font-size: 12px; margin-bottom: 2px; }
+    .file-option span { color: var(--muted); }
     .pair-list { display: grid; gap: 6px; }
     .pair-row { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 9px; cursor: pointer; }
     .pair-row.active { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
@@ -266,8 +273,16 @@ def build_html() -> str:
       <div class="stats" id="stats"></div>
       <div class="controls">
         <label>Search pair or file
-          <input id="search" placeholder="A001, rig-pa, SMDG...">
+          <input id="search" list="fileOptions" placeholder="A001, rig-pa, SMDG...">
+          <datalist id="fileOptions"></datalist>
         </label>
+        <div class="file-browser">
+          <div class="file-browser-head">
+            <div class="file-browser-title">Available Files</div>
+            <button id="clearSearch" type="button">Clear</button>
+          </div>
+          <div class="file-browser-list" id="fileBrowser"></div>
+        </div>
         <label>Sort pairs by
           <select id="sortMetric">
             <option value="max_score">Max score</option>
@@ -352,6 +367,7 @@ def build_html() -> str:
       renderStats();
       renderResources();
       renderDocs();
+      renderFileBrowser();
       bindControls();
       renderPairList();
       renderOverview();
@@ -383,7 +399,15 @@ def build_html() -> str:
     }
 
     function bindControls() {
-      $('search').addEventListener('input', renderPairList);
+      $('search').addEventListener('input', () => {
+        renderFileBrowser();
+        renderPairList();
+      });
+      $('clearSearch').addEventListener('click', () => {
+        $('search').value = '';
+        renderFileBrowser();
+        renderPairList();
+      });
       $('sortMetric').addEventListener('change', renderPairList);
       $('topK').addEventListener('input', renderMatches);
       document.querySelectorAll('[data-overview]').forEach(btn => {
@@ -402,6 +426,34 @@ def build_html() -> str:
       return DATA.pairs
         .filter(p => !q || [p.pair_id, p.doc_a_name, p.doc_b_name, p.doc_a_relative_path, p.doc_b_relative_path].join(' ').toLowerCase().includes(q))
         .sort((a, b) => Number(b[metric]) - Number(a[metric]));
+    }
+
+    function allDocs() {
+      return [
+        ...DATA.documentsA.map(d => ({...d, corpus: 'SMDG'})),
+        ...DATA.documentsB.map(d => ({...d, corpus: 'Txt-18'}))
+      ];
+    }
+
+    function renderFileBrowser() {
+      const docs = allDocs();
+      $('fileOptions').innerHTML = docs.map(d => `<option value="${escapeHtml(d.doc_id)}">${escapeHtml(d.corpus + ' · ' + d.relative_path)}</option>`).join('');
+      const q = $('search').value.trim().toLowerCase();
+      const rows = docs
+        .filter(d => !q || [d.doc_id, d.relative_path, d.short_name, d.corpus].join(' ').toLowerCase().includes(q))
+        .slice(0, 38);
+      $('fileBrowser').innerHTML = rows.map(d => `
+        <button class="file-option" type="button" data-file-query="${escapeHtml(d.doc_id)}">
+          <b>${escapeHtml(d.doc_id)} · ${escapeHtml(d.corpus)}</b>
+          <span>${escapeHtml(d.relative_path)} · ${fmt.format(d.sentence_count)} sentences</span>
+        </button>`).join('');
+      document.querySelectorAll('[data-file-query]').forEach(el => {
+        el.addEventListener('click', () => {
+          $('search').value = el.dataset.fileQuery;
+          renderFileBrowser();
+          renderPairList();
+        });
+      });
     }
 
     function renderPairList() {
