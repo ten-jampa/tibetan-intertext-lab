@@ -132,7 +132,9 @@
           <button data-overview="p95_score">Overview: p95</button>
         </div>
       </div>
-      <h2>Corpus Heatmap</h2>
+      <h2>Corpus Heatmap <button class="info-btn" type="button" data-help="helpOverviewHeatmap" aria-label="Explain corpus heatmap">i</button></h2>
+      <div class="help-popover" id="helpOverviewHeatmap">The overview heatmap recolors the same 16 x 22 document grid using the selected metric. It does not change the underlying texts or matrices; it changes which summary statistic is used to color each document-pair cell.</div>
+      <div class="method-note" id="overviewMetricNote"></div>
       <div class="canvas-wrap"><canvas id="overviewCanvas" width="360" height="260"></canvas></div>
       <p class="note">Rows are SMDG docs, columns are Txt-18 docs. Click a cell or a pair row to inspect details.</p>
       <h2>Pairs</h2>
@@ -200,6 +202,24 @@
     const fmt = new Intl.NumberFormat('en-US');
     const score = (x) => Number(x).toFixed(3);
     const $ = (id) => document.getElementById(id);
+    const overviewNotes = {
+      max_score: {
+        title: 'Overview: max',
+        body: 'Each cell is colored by the single strongest sentence-pair score between the two documents. This is sensitive to local reuse, formulaic overlap, or one striking passage, but it can overstate a relationship if the rest of the matrix is weak.'
+      },
+      mean_best_a_to_b: {
+        title: 'Overview: best A to B',
+        body: 'For each SMDG sentence, find its best match anywhere in the Txt-18 document, then average those best scores. High values mean much of the SMDG text finds plausible coverage in Txt-18. This is directional and should not be read as historical influence by itself.'
+      },
+      mean_best_b_to_a: {
+        title: 'Overview: best B to A',
+        body: 'For each Txt-18 sentence, find its best match anywhere in the SMDG document, then average those best scores. High values often show that a shorter Txt-18 text is well covered by a broader SMDG text, or that the two share a concentrated semantic field.'
+      },
+      p95_score: {
+        title: 'Overview: p95',
+        body: 'Each cell is colored by the 95th percentile of all sentence-pair scores in the matrix. This ignores most ordinary cells and asks whether the upper tail is broadly elevated. It is usually better than max for finding sustained document-pair similarity.'
+      }
+    };
 
     function colorFor(v, min, max) {
       const t = max === min ? 0 : Math.max(0, Math.min(1, (v - min) / (max - min)));
@@ -379,6 +399,7 @@
     }
 
     function renderOverview() {
+      renderOverviewMetricNote();
       const canvas = $('overviewCanvas');
       const ctx = canvas.getContext('2d');
       const margin = { left: 48, right: 12, top: 18, bottom: 42 };
@@ -419,6 +440,11 @@
           selectPair(`${DATA.documentsA[ai].doc_id}__${DATA.documentsB[bi].doc_id}`);
         }
       };
+    }
+
+    function renderOverviewMetricNote() {
+      const note = overviewNotes[overviewMetric];
+      $('overviewMetricNote').innerHTML = `<p><b>${note.title}:</b> ${escapeHtml(note.body)}</p>`;
     }
 
     function renderPairHeatmap() {
