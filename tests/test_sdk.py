@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -151,6 +153,48 @@ class SDKTests(unittest.TestCase):
         self.assertEqual(pairwise_view.segment_records_a[0].index, 0)
         self.assertEqual(pairwise_view.segment_records_b[1].index, 1)
         self.assertGreaterEqual(pairwise_view.metrics.max_score, 0.0)
+
+    def test_bidirectional_corpus_pairwise_uses_sdk_defaults(self) -> None:
+        sdk = TibetanResearchSDK(
+            engine="botok_ours",
+            source_format="unicode",
+            botok_cache_dir="cache",
+            min_syllables=3,
+            model_id="fake/model",
+            batch_size=4,
+            device="cpu",
+        )
+
+        with patch("tibetan_pipeline.corpus_bidirectional.run_corpus_pairwise_similarity") as mock_run:
+            with patch("tibetan_pipeline.corpus_bidirectional.generate_corpus_pairwise_report"):
+                with patch("tibetan_pipeline.corpus_bidirectional.generate_bidirectional_synthesis_report"):
+                    def fake_run(**kwargs: object) -> dict[str, Path]:
+                        run_dir = Path(kwargs["output_dir"])
+                        run_dir.mkdir(parents=True, exist_ok=True)
+                        artifacts = {
+                            "documents_a_csv": run_dir / "documents_a.csv",
+                            "documents_b_csv": run_dir / "documents_b.csv",
+                            "summary_csv": run_dir / "document_pair_summary.csv",
+                            "manifest_json": run_dir / "corpus_manifest.json",
+                        }
+                        for path in artifacts.values():
+                            path.write_text("{}", encoding="utf-8")
+                        return artifacts
+
+                    mock_run.side_effect = fake_run
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        root = Path(temp_dir)
+                        out = root / "out"
+                        sdk.bidirectional_corpus_pairwise("a", "b", out, generate_reports=False)
+
+        first_call = mock_run.call_args_list[0].kwargs
+        self.assertEqual(first_call["engine"], "botok_ours")
+        self.assertEqual(first_call["source_format"], "unicode")
+        self.assertEqual(first_call["botok_cache_dir"], "cache")
+        self.assertEqual(first_call["min_syllables"], 3)
+        self.assertEqual(first_call["model_id"], "fake/model")
+        self.assertEqual(first_call["batch_size"], 4)
+        self.assertEqual(first_call["device"], "cpu")
 
 
 if __name__ == "__main__":

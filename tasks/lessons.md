@@ -10,3 +10,4 @@
 - When caching expensive inference objects, key the cache by heavyweight load-time settings only; mutable runtime knobs like batch size and progress logging should update the existing instance instead of forcing a model reload.
 - If a verification command is part of the repo standard, add its tool as a project dev dependency instead of reporting that it is missing from the current local environment.
 - When a visualization has a mode selector, explain how the selected mode changes the meaning of the colors/marks directly beside the visualization, not only in a separate conversation.
+- Do not assume corpus filenames are readable evidence labels. Reports should show a human-readable corpus/title label first, then expose exact filenames and paths as provenance.

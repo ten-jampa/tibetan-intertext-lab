@@ -299,6 +299,27 @@ class TibetanResearchSDK:
             metrics=result.metrics,
         )
 
+    def bidirectional_corpus_pairwise(self, dir_a: str | Path, dir_b: str | Path, output_dir: str | Path, **kwargs: object):
+        """Run corpus pairwise analysis both directions using this SDK's defaults."""
+        from .corpus_bidirectional import run_bidirectional_corpus_pairwise
+
+        defaults = {
+            "engine": self.engine,
+            "source_format": self.source_format,
+            "botok_cache_dir": self.botok_cache_dir,
+            "min_syllables": self.min_syllables,
+            "model_id": self.model_id,
+            "batch_size": self.batch_size,
+            "device": self.device,
+            "embedding_progress": self.embedding_progress,
+            "torch_dtype": self.torch_dtype,
+            "device_map": self.device_map,
+            "load_in_8bit": self.load_in_8bit,
+            "low_cpu_mem_usage": self.low_cpu_mem_usage,
+        }
+        defaults.update(kwargs)
+        return run_bidirectional_corpus_pairwise(dir_a, dir_b, output_dir, **defaults)
+
     def _segment_text_to_sentences(self, text: str) -> list[str]:
         view = self.segment_text(text)
         return [segment for segment in view.segments if segment.strip()]

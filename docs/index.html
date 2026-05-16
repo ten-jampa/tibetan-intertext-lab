@@ -43,9 +43,19 @@
     <h1>Tibetan Embedding Reports</h1>
     <p>Static research artifacts for the Tibetan corpus pairwise embedding project.</p>
     <div class="report">
-      <h2>Full Corpus Pairwise Report</h2>
+      <h2>Forward Corpus Pairwise Report</h2>
       <p>SMDG x Txt-18 sentence-level embedding similarity matrices, heatmaps, top match views, and whole-text stream profiles.</p>
       <p><a href="./corpus_pairwise_full/">Open report</a></p>
+    </div>
+    <div class="report">
+      <h2>Reverse Corpus Pairwise Report</h2>
+      <p>Txt-18 x SMDG reverse prompt-direction run, useful for checking model-direction sensitivity in asymmetric decoder embeddings.</p>
+      <p><a href="./corpus_pairwise_reverse_full/">Open report</a></p>
+    </div>
+    <div class="report">
+      <h2>Bidirectional Pair Survival Report</h2>
+      <p>Synthesizes forward and reverse runs, then prioritizes file pairs whose broad, local, or directional signal survives both directions.</p>
+      <p><a href="./corpus_pairwise_bidirectional_synthesis/">Open report</a></p>
     </div>
   </main>
 </body>

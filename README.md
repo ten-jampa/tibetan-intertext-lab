@@ -181,6 +181,64 @@ uv run python scripts/generate_corpus_pairwise_report.py \
 
 The report writes `report/index.html` and `report/report_data.js` under the run directory. It includes run metrics, document embedding metadata, a corpus-level heatmap, per-pair downsampled sentence heatmaps, and interactive top-k match browsing across the same raw/unique/diverse modes.
 
+### 4) Bidirectional corpus workflow
+
+Run both prompt directions and generate the forward, reverse, and synthesis reports:
+```bash
+uv run python scripts/run_bidirectional_corpus_pairwise.py \
+  --dir-a path/to/SMDG \
+  --dir-b path/to/Txt-18 \
+  --label-a SMDG \
+  --label-b Txt-18 \
+  --output-dir output/corpus_pairwise_bidirectional \
+  --device cuda \
+  --torch-dtype bfloat16 \
+  --batch-size 1 \
+  --top-k 100
+```
+
+No-cost planning check:
+```bash
+uv run python scripts/run_bidirectional_corpus_pairwise.py \
+  --dir-a path/to/SMDG \
+  --dir-b path/to/Txt-18 \
+  --output-dir output/corpus_pairwise_bidirectional \
+  --label-a SMDG \
+  --label-b Txt-18 \
+  --dry-run
+```
+
+Regenerate only reports from existing forward/reverse artifacts:
+```bash
+uv run python scripts/run_bidirectional_corpus_pairwise.py \
+  --dir-a path/to/SMDG \
+  --dir-b path/to/Txt-18 \
+  --output-dir output/corpus_pairwise_bidirectional \
+  --label-a SMDG \
+  --label-b Txt-18 \
+  --reports-only
+```
+
+Python API:
+```python
+from tibetan_pipeline.corpus_bidirectional import run_bidirectional_corpus_pairwise
+
+artifacts = run_bidirectional_corpus_pairwise(
+    dir_a="path/to/SMDG",
+    dir_b="path/to/Txt-18",
+    output_dir="output/corpus_pairwise_bidirectional",
+    label_a="SMDG",
+    label_b="Txt-18",
+    device="cuda",
+    generate_reports=True,
+)
+```
+
+Output layout:
+- `forward/`: corpus A encoded as query side, corpus B encoded as corpus side
+- `reverse/`: corpus B encoded as query side, corpus A encoded as corpus side
+- `synthesis/report/`: bidirectional survival report with `synthesis.csv`, `synthesis.json`, and `index.html`
+
 ## Notebook SDK
 `TibetanResearchSDK` supports segmentation, embeddings, and pairwise analysis in Jupyter.
 

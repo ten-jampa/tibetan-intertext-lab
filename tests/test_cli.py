@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from scripts import run_corpus_pairwise_similarity
+from scripts import run_bidirectional_corpus_pairwise, run_corpus_pairwise_similarity
 from tibetan_pipeline.cli import run
 from tibetan_pipeline.embeddings import EmbeddingResult
 from tibetan_pipeline.pipeline import PipelineArtifacts
@@ -111,3 +111,40 @@ class CLITests(unittest.TestCase):
             self.assertIn("doc_count_a=1", printed)
             self.assertIn("doc_count_b=1", printed)
             self.assertIn("pair_count=1", printed)
+
+    def test_bidirectional_corpus_pairwise_dry_run_reports_both_directions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dir_a = root / "a"
+            dir_b = root / "b"
+            dir_a.mkdir()
+            dir_b.mkdir()
+            (dir_a / "a1.txt").write_text("a1", encoding="utf-8")
+            (dir_a / "a2.txt").write_text("a2", encoding="utf-8")
+            (dir_b / "b1.txt").write_text("b1", encoding="utf-8")
+            args = [
+                "--dir-a",
+                str(dir_a),
+                "--dir-b",
+                str(dir_b),
+                "--output-dir",
+                str(root / "out"),
+                "--label-a",
+                "SMDG",
+                "--label-b",
+                "Txt-18",
+                "--limit-a",
+                "1",
+                "--dry-run",
+            ]
+
+            with patch("builtins.print") as mock_print:
+                exit_code = run_bidirectional_corpus_pairwise.main(args)
+
+            self.assertEqual(exit_code, 0)
+            printed = [call.args[0] for call in mock_print.call_args_list]
+            self.assertIn("forward=SMDG -> Txt-18", printed)
+            self.assertIn("reverse=Txt-18 -> SMDG", printed)
+            self.assertIn("doc_count_a=1", printed)
+            self.assertIn("doc_count_b=1", printed)
+            self.assertIn("pair_count_per_direction=1", printed)
