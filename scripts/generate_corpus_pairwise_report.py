@@ -92,6 +92,7 @@ def build_report_data(run_dir: Path, heatmap_size: int, max_topk: int) -> dict[s
                 "topk": topk_by_mode["raw"],
                 "topk_by_mode": topk_by_mode,
                 "heatmap": downsample_matrix(matrix, heatmap_size),
+                "stream_profiles": build_stream_profiles(matrix, heatmap_size * 2),
             }
         )
 
@@ -211,6 +212,44 @@ def downsample_matrix(matrix: np.ndarray, size: int) -> list[list[float]]:
     return sampled
 
 
+def downsample_vector(vector: np.ndarray, size: int) -> list[float]:
+    edges = np.linspace(0, len(vector), min(size, len(vector)) + 1, dtype=int)
+    sampled = []
+    for start, end in zip(edges[:-1], edges[1:]):
+        block = vector[start:max(end, start + 1)]
+        sampled.append(round(float(np.mean(block)), 4))
+    return sampled
+
+
+def build_stream_profiles(matrix: np.ndarray, size: int) -> dict[str, dict[str, list[float]]]:
+    modes = {
+        "best_1": 1,
+        "top_3_avg": 3,
+        "top_5_avg": 5,
+    }
+    profiles: dict[str, dict[str, list[float]]] = {}
+    for mode, k in modes.items():
+        profiles[mode] = {
+            "a_to_b": downsample_vector(top_k_axis_mean(matrix, axis=1, k=k), size),
+            "b_to_a": downsample_vector(top_k_axis_mean(matrix, axis=0, k=k), size),
+        }
+    return profiles
+
+
+def top_k_axis_mean(matrix: np.ndarray, *, axis: int, k: int) -> np.ndarray:
+    axis_len = matrix.shape[axis]
+    effective_k = min(k, axis_len)
+    if effective_k == 1:
+        return np.max(matrix, axis=axis)
+    partition_index = axis_len - effective_k
+    top_values = np.partition(matrix, partition_index, axis=axis)
+    if axis == 1:
+        return np.mean(top_values[:, partition_index:], axis=1)
+    if axis == 0:
+        return np.mean(top_values[partition_index:, :], axis=0)
+    raise ValueError(f"Unsupported axis: {axis}")
+
+
 def read_gpu_monitor(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -277,6 +316,10 @@ def build_html() -> str:
     input, select { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 8px 10px; font-size: 14px; }
     button { border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); padding: 8px 10px; font-size: 13px; cursor: pointer; }
     button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .info-btn { width: 22px; height: 22px; border-radius: 999px; padding: 0; font-size: 12px; font-weight: 700; line-height: 1; color: var(--accent); }
+    .help-popover { display: none; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; color: var(--ink); font-size: 12px; line-height: 1.45; box-shadow: 0 12px 28px rgba(0,0,0,.08); }
+    .help-popover.open { display: block; }
     .metric-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
     .file-browser { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 10px; display: grid; gap: 8px; }
     .file-browser-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -304,6 +347,9 @@ def build_html() -> str:
     .sentences { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .sentence { font-size: 15px; line-height: 1.6; padding: 10px; border-radius: 6px; background: var(--panel); }
     .note { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .method-note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; margin: 0 0 14px; font-size: 13px; line-height: 1.5; }
+    .method-note p { margin: 0 0 8px; }
+    .method-note p:last-child { margin-bottom: 0; }
     .bar { height: 8px; background: #e9e4d9; border-radius: 999px; overflow: hidden; }
     .bar > span { display: block; height: 100%; background: var(--accent); }
     @media (max-width: 980px) {
@@ -323,9 +369,10 @@ def build_html() -> str:
     <aside>
       <div class="stats" id="stats"></div>
       <div class="controls">
-        <label>Search pair or file
+        <label><span class="label-row"><span>Search pair or file</span><button class="info-btn" type="button" data-help="helpSearch" aria-label="Explain search">i</button></span>
           <input id="search" list="fileOptions" placeholder="A001, rig-pa, SMDG...">
           <datalist id="fileOptions"></datalist>
+          <div class="help-popover" id="helpSearch">Filters the pair list by pair id, file id, or filename. Clicking an available file inserts its id so you can see all pairs involving that file.</div>
         </label>
         <div class="file-browser">
           <div class="file-browser-head">
@@ -334,7 +381,7 @@ def build_html() -> str:
           </div>
           <div class="file-browser-list" id="fileBrowser"></div>
         </div>
-        <label>Sort pairs by
+        <label><span class="label-row"><span>Sort pairs by</span><button class="info-btn" type="button" data-help="helpSort" aria-label="Explain sort metrics">i</button></span>
           <select id="sortMetric">
             <option value="max_score">Max score</option>
             <option value="mean_best_a_to_b">Mean best A to B</option>
@@ -343,11 +390,13 @@ def build_html() -> str:
             <option value="mean_score">Mean score</option>
             <option value="score_count">Matrix size</option>
           </select>
+          <div class="help-popover" id="helpSort">Max is the strongest single sentence hit. P95 is the broad upper tail. Mean best A to B asks how well each SMDG sentence finds a match in Txt-18; B to A asks the reverse. Matrix size is sentence count A times sentence count B.</div>
         </label>
-        <label>Top K shown for selected pair
+        <label><span class="label-row"><span>Top K shown for selected pair</span><button class="info-btn" type="button" data-help="helpTopK" aria-label="Explain top K">i</button></span>
           <input id="topK" type="number" min="1" max="100" value="20">
+          <div class="help-popover" id="helpTopK">Controls how many sentence-pair matches are displayed for the selected document pair. The saved matrix supports regenerating other K values later.</div>
         </label>
-        <label>Match view
+        <label><span class="label-row"><span>Match view</span><button class="info-btn" type="button" data-help="helpMatchView" aria-label="Explain match views">i</button></span>
           <select id="matchMode">
             <option value="raw">Raw top-k</option>
             <option value="unique_a">Unique A</option>
@@ -355,6 +404,7 @@ def build_html() -> str:
             <option value="unique_both">Unique both</option>
             <option value="diverse_both">Diverse both</option>
           </select>
+          <div class="help-popover" id="helpMatchView">Raw can repeat the same sentence many times. Unique A lets each SMDG sentence appear once. Unique B lets each Txt-18 sentence appear once. Unique both is one-to-one. Diverse both also suppresses nearby sentence clumps on both sides.</div>
         </label>
         <div class="metric-buttons">
           <button class="active" data-overview="max_score">Overview: max</button>
@@ -379,10 +429,28 @@ def build_html() -> str:
             <p class="note">This is a downsampled view of the full sentence-by-sentence matrix. Full `.npy` paths remain in the pair artifacts.</p>
           </div>
           <div class="panel">
-            <h2>Run Resources</h2>
-            <div id="resources"></div>
-            <canvas id="gpuCanvas" width="620" height="180"></canvas>
+            <h2>Selected Pair Metrics <button class="info-btn" type="button" data-help="helpPairMetrics" aria-label="Explain selected pair metrics">i</button></h2>
+            <div class="help-popover" id="helpPairMetrics">These summarize the entire sentence-by-sentence matrix for the selected pair. Directional metrics are not claims about historical influence; they show coverage asymmetry between the two texts.</div>
+            <div id="pairMetrics"></div>
+            <p class="note">Use these as triage signals, not as final philological claims. Strong candidates still need close reading.</p>
           </div>
+        </div>
+        <div class="panel">
+          <h2>Whole-Text Stream Profile <button class="info-btn" type="button" data-help="helpStream" aria-label="Explain whole-text stream profile">i</button></h2>
+          <div class="help-popover" id="helpStream">This treats each text as an ordered stream. Best 1 is sensitive to the strongest local contact. Top 3 and Top 5 average ask whether each sentence has several good counterparts, making the profile more conservative.</div>
+          <div class="method-note">
+            <p><b>Method:</b> for every sentence in one text, the report finds its strongest sentence-level embedding matches anywhere in the other text, then plots the selected aggregation in the original sentence order. The upper line is SMDG to Txt-18 coverage; the lower line is Txt-18 to SMDG coverage.</p>
+            <p><b>What to read from it:</b> Best 1 highlights the strongest local contact. Top 3 average and Top 5 average are more conservative because they require several good counterparts, not just one spike. Sustained elevated regions suggest broader passage-level coverage. This is a directional nearest-neighbor coverage profile derived from the full similarity matrix, related to accepted similarity-matrix, alignment, and text-reuse workflows. It is exploratory evidence for close reading, not proof of borrowing or historical direction by itself.</p>
+          </div>
+          <label><span class="label-row"><span>Stream aggregation</span><button class="info-btn" type="button" data-help="helpStreamMode" aria-label="Explain stream aggregation">i</button></span>
+            <select id="streamMode">
+              <option value="best_1">Best 1</option>
+              <option value="top_3_avg">Top 3 average</option>
+              <option value="top_5_avg">Top 5 average</option>
+            </select>
+            <div class="help-popover" id="helpStreamMode">Best 1 asks whether each sentence has at least one strong counterpart. Top 3/5 average asks whether the sentence sits in a broader shared semantic neighborhood.</div>
+          </label>
+          <div class="canvas-wrap"><canvas id="streamCanvas" width="620" height="220"></canvas></div>
         </div>
         <div class="panel">
           <h2>Top Matches</h2>
@@ -395,6 +463,11 @@ def build_html() -> str:
             <div><h3>Txt-18</h3><div id="docsB"></div></div>
           </div>
         </div>
+        <div class="panel">
+          <h2>Colophon</h2>
+          <div id="colophon"></div>
+          <canvas id="gpuCanvas" width="620" height="180"></canvas>
+        </div>
       </div>
     </section>
   </main>
@@ -403,6 +476,7 @@ def build_html() -> str:
     let selectedPair = DATA.pairs[0];
     let overviewMetric = 'max_score';
     let matchMode = 'raw';
+    let streamMode = 'best_1';
 
     const fmt = new Intl.NumberFormat('en-US');
     const score = (x) => Number(x).toFixed(3);
@@ -424,9 +498,9 @@ def build_html() -> str:
     }
 
     function init() {
-      $('runSubtitle').textContent = `${DATA.run.model_id} · ${DATA.run.device} · ${DATA.run.doc_count_a} x ${DATA.run.doc_count_b} docs · ${fmt.format(DATA.run.total_sentences)} sentence embeddings`;
+      $('runSubtitle').textContent = `${DATA.run.doc_count_a} SMDG files x ${DATA.run.doc_count_b} Txt-18 files · ${fmt.format(DATA.run.pair_count)} pairwise matrices · ${fmt.format(DATA.run.total_sentences)} sentence embeddings`;
       renderStats();
-      renderResources();
+      renderColophon();
       renderDocs();
       renderFileBrowser();
       bindControls();
@@ -436,25 +510,27 @@ def build_html() -> str:
     }
 
     function renderStats() {
-      const rssGb = DATA.run.max_resident_set_kb ? (DATA.run.max_resident_set_kb / 1024 / 1024).toFixed(1) + ' GB' : 'n/a';
       const stats = [
         [DATA.run.pair_count, 'document pairs'],
+        [`${DATA.run.doc_count_a} x ${DATA.run.doc_count_b}`, 'corpus shape'],
         [DATA.run.total_sentences, 'sentence embeddings'],
         [DATA.run.embedding_dim, 'embedding dimensions'],
-        [DATA.run.wall_time || 'n/a', 'wall time'],
-        [DATA.run.max_gpu_mem_mib + ' MiB', 'peak GPU memory'],
-        [rssGb, 'peak host RSS']
+        [DATA.pairs.length, 'saved matrices'],
+        ['5', 'match views']
       ];
       $('stats').innerHTML = stats.map(([v, label]) => `<div class="stat"><b>${formatValue(v)}</b><span>${label}</span></div>`).join('');
     }
 
-    function renderResources() {
-      $('resources').innerHTML = `
+    function renderColophon() {
+      const rssGb = DATA.run.max_resident_set_kb ? (DATA.run.max_resident_set_kb / 1024 / 1024).toFixed(1) + ' GB' : 'n/a';
+      $('colophon').innerHTML = `
         <table>
           <tr><th>Model</th><td>${escapeHtml(DATA.run.model_id)}</td></tr>
           <tr><th>Device</th><td>${DATA.run.device}, batch ${DATA.run.batch_size}</td></tr>
+          <tr><th>Wall time</th><td>${DATA.run.wall_time || 'n/a'}</td></tr>
           <tr><th>Peak GPU util</th><td>${DATA.run.max_gpu_util_pct}%</td></tr>
           <tr><th>Peak GPU memory</th><td>${DATA.run.max_gpu_mem_mib} MiB</td></tr>
+          <tr><th>Peak host RSS</th><td>${rssGb}</td></tr>
         </table>`;
       drawGpu();
     }
@@ -475,12 +551,21 @@ def build_html() -> str:
         matchMode = $('matchMode').value;
         renderMatches();
       });
+      $('streamMode').addEventListener('change', () => {
+        streamMode = $('streamMode').value;
+        renderStreamProfile();
+      });
       document.querySelectorAll('[data-overview]').forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll('[data-overview]').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
           overviewMetric = btn.dataset.overview;
           renderOverview();
+        });
+      });
+      document.querySelectorAll('[data-help]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          $(btn.dataset.help).classList.toggle('open');
         });
       });
     }
@@ -535,7 +620,9 @@ def build_html() -> str:
       selectedPair = DATA.pairs.find(p => p.pair_id === pairId) || DATA.pairs[0];
       renderPairList();
       renderPairHeader();
+      renderPairMetrics();
       renderPairHeatmap();
+      renderStreamProfile();
       renderMatches();
     }
 
@@ -550,6 +637,25 @@ def build_html() -> str:
         <table>
           <tr><th>Max</th><th>P95</th><th>Mean</th><th>Mean best A→B</th><th>Mean best B→A</th><th>Matrix cells</th></tr>
           <tr><td>${score(p.max_score)}</td><td>${score(p.p95_score)}</td><td>${score(p.mean_score)}</td><td>${score(p.mean_best_a_to_b)}</td><td>${score(p.mean_best_b_to_a)}</td><td>${fmt.format(p.score_count)}</td></tr>
+        </table>`;
+    }
+
+    function renderPairMetrics() {
+      const p = selectedPair;
+      const asymmetry = Number(p.mean_best_b_to_a) - Number(p.mean_best_a_to_b);
+      const direction = Math.abs(asymmetry) < 0.025
+        ? 'balanced coverage'
+        : asymmetry > 0
+          ? 'Txt-18 sentences find stronger homes in SMDG'
+          : 'SMDG sentences find stronger homes in Txt-18';
+      $('pairMetrics').innerHTML = `
+        <table>
+          <tr><th>Max score</th><td>${score(p.max_score)}<br><span class="note">strongest single sentence-pair hit</span></td></tr>
+          <tr><th>P95 score</th><td>${score(p.p95_score)}<br><span class="note">upper-tail breadth across the matrix</span></td></tr>
+          <tr><th>Mean best A to B</th><td>${score(p.mean_best_a_to_b)}</td></tr>
+          <tr><th>Mean best B to A</th><td>${score(p.mean_best_b_to_a)}</td></tr>
+          <tr><th>Coverage pattern</th><td>${escapeHtml(direction)} (${asymmetry >= 0 ? '+' : ''}${asymmetry.toFixed(3)})</td></tr>
+          <tr><th>Matrix cells</th><td>${fmt.format(p.score_count)}</td></tr>
         </table>`;
     }
 
@@ -621,6 +727,41 @@ def build_html() -> str:
       ctx.fillText(`B sentences (${selectedPair.sentence_count_b})`, 0, 0);
       ctx.restore();
       ctx.fillText(`mean ${score(selectedPair.mean_score)} · max ${score(selectedPair.max_score)}`, margin.left, 14);
+    }
+
+    function renderStreamProfile() {
+      const canvas = $('streamCanvas');
+      const ctx = canvas.getContext('2d');
+      const profile = selectedPair.stream_profiles?.[streamMode] || selectedPair.stream_profiles.best_1;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const label = streamMode === 'best_1' ? 'Best 1' : streamMode === 'top_3_avg' ? 'Top 3 average' : 'Top 5 average';
+      drawProfileLine(ctx, profile.a_to_b, 30, 70, '#245c63', `${label}: A to B coverage across SMDG order`);
+      drawProfileLine(ctx, profile.b_to_a, 132, 70, '#a6422a', `${label}: B to A coverage across Txt-18 order`);
+    }
+
+    function drawProfileLine(ctx, values, top, height, color, label) {
+      const left = 46, right = 18;
+      const width = ctx.canvas.width - left - right;
+      const min = Math.min(...values), max = Math.max(...values);
+      ctx.strokeStyle = '#d8d8d8';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(left, top, width, height);
+      ctx.fillStyle = '#666';
+      ctx.font = '12px system-ui';
+      ctx.fillText(label, left, top - 9);
+      ctx.fillText(max.toFixed(2), 8, top + 10);
+      ctx.fillText(min.toFixed(2), 8, top + height);
+      ctx.beginPath();
+      values.forEach((value, index) => {
+        const x = left + (values.length === 1 ? 0 : index * width / (values.length - 1));
+        const t = max === min ? .5 : (value - min) / (max - min);
+        const y = top + height - t * height;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
 
     function renderMatches() {
