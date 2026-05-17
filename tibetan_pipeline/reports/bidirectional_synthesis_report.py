@@ -301,6 +301,7 @@ def build_html() -> str:
     }
     header, main, footer { max-width: 1280px; margin: 0 auto; padding: 24px; }
     header { padding-top: 36px; }
+    .top-link { display: inline-block; margin-bottom: 10px; color: var(--accent); font-size: 13px; font-weight: 700; text-decoration: none; }
     h1 { margin: 0 0 10px; font-size: clamp(30px, 4vw, 52px); letter-spacing: 0; }
     h2 { margin: 30px 0 12px; font-size: 22px; }
     p { margin: 0 0 12px; color: var(--muted); max-width: 900px; }
@@ -408,6 +409,7 @@ def build_html() -> str:
 </head>
 <body>
   <header>
+    <a class="top-link" href="../">Reports index</a>
     <h1>Bidirectional Pair Survival Report</h1>
     <p>This report joins the forward run (SMDG as query side, Txt-18 as corpus side) with the reverse run (Txt-18 as query side, SMDG as corpus side). It prioritizes file pairs whose signal remains high in both model prompt directions.</p>
     <div class="summary" id="summary"></div>

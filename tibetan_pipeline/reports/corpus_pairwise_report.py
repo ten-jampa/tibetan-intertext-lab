@@ -66,6 +66,7 @@ def build_report_data(run_dir: Path, heatmap_size: int, max_topk: int) -> dict[s
             row["sentence_count"] = int(row["sentence_count"])
             row["short_name"] = shorten_path(row["relative_path"])
             row["embedding_shape"] = list(np.load(resolve_run_path(run_dir, row["embeddings_npy"]), mmap_mode="r").shape)
+            row["sentences"] = read_doc_sentences(resolve_run_path(run_dir, row["sentences_csv"]))
 
     pair_payloads: list[dict[str, Any]] = []
     for row in pairs:
@@ -146,6 +147,10 @@ def build_report_data(run_dir: Path, heatmap_size: int, max_topk: int) -> dict[s
 def read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def read_doc_sentences(path: Path) -> list[str]:
+    return [segment.text for segment in read_segments(path)]
 
 
 def resolve_run_path(run_dir: Path, raw_path: str) -> Path:
@@ -319,6 +324,7 @@ def build_html() -> str:
     * { box-sizing: border-box; }
     body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
     header { padding: 26px 32px 18px; border-bottom: 1px solid var(--line); background: #fff; }
+    .top-link { display: inline-block; margin-bottom: 10px; color: var(--accent); font-size: 13px; font-weight: 700; text-decoration: none; }
     h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: 0; }
     h2 { margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }
     h3 { margin: 0 0 8px; font-size: 15px; letter-spacing: 0; }
@@ -361,10 +367,17 @@ def build_html() -> str:
     th, td { border-bottom: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
     th { color: var(--muted); font-size: 12px; font-weight: 700; background: #fafafa; position: sticky; top: 0; }
     .matches { display: grid; gap: 10px; }
-    .match { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
+    .match { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; cursor: pointer; }
+    .match.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(36, 92, 99, .12); }
     .match-head { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
     .sentences { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .sentence { font-size: 15px; line-height: 1.6; padding: 10px; border-radius: 6px; background: var(--panel); }
+    .context-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .context-col { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fbfbf7; }
+    .context-title { padding: 8px 10px; background: #ece8d9; font-weight: 700; font-size: 13px; }
+    .context-row { display: grid; grid-template-columns: 48px 1fr; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.55; }
+    .context-row.hit { background: #fff7d6; }
+    .context-index { color: var(--muted); font-variant-numeric: tabular-nums; }
     .note { color: var(--muted); font-size: 12px; line-height: 1.45; }
     .method-note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; margin: 0 0 14px; font-size: 13px; line-height: 1.5; }
     .method-note p { margin: 0 0 8px; }
@@ -375,12 +388,13 @@ def build_html() -> str:
       main { grid-template-columns: 1fr; }
       aside, section { max-height: none; }
       aside { border-right: 0; border-bottom: 1px solid var(--line); }
-      .two, .sentences { grid-template-columns: 1fr; }
+      .two, .sentences, .context-panel { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <header>
+    <a class="top-link" href="../">Reports index</a>
     <h1>Tibetan Corpus Pairwise Report</h1>
     <div class="sub" id="runSubtitle"></div>
   </header>
@@ -498,6 +512,8 @@ def build_html() -> str:
     let overviewMetric = 'max_score';
     let matchMode = 'raw';
     let streamMode = 'best_1';
+    let selectedMatchKey = null;
+    const contextRadius = 3;
 
     const fmt = new Intl.NumberFormat('en-US');
     const score = (x) => Number(x).toFixed(3);
@@ -657,6 +673,7 @@ def build_html() -> str:
 
     function selectPair(pairId) {
       selectedPair = DATA.pairs.find(p => p.pair_id === pairId) || DATA.pairs[0];
+      selectedMatchKey = null;
       renderPairList();
       renderPairHeader();
       renderPairMetrics();
@@ -820,16 +837,52 @@ def build_html() -> str:
         diverse_both: 'Diverse both is one-to-one and suppresses neighboring sentence clumps.'
       };
       $('matches').innerHTML = `<p class="note">${modeNotes[matchMode]} Showing ${rows.length} rows for ${selectedPair.pair_id}.</p>` + rows.map(m => `
-        <div class="match">
+        <div class="match ${matchKey(m) === selectedMatchKey ? 'active' : ''}" data-match-key="${escapeHtml(matchKey(m))}">
           <div class="match-head">
             <span>#${m.rank} · score ${score(m.score)} · A[${m.i}] ↔ B[${m.j}]</span>
-            <span>${selectedPair.pair_id}</span>
+            <span>click for ±3 context</span>
           </div>
           <div class="sentences">
             <div class="sentence">${escapeHtml(m.sentence_a)}</div>
             <div class="sentence">${escapeHtml(m.sentence_b)}</div>
           </div>
+          ${matchKey(m) === selectedMatchKey ? renderMatchContext(m) : ''}
         </div>`).join('');
+      document.querySelectorAll('[data-match-key]').forEach(el => {
+        el.addEventListener('click', () => {
+          selectedMatchKey = selectedMatchKey === el.dataset.matchKey ? null : el.dataset.matchKey;
+          renderMatches();
+        });
+      });
+    }
+
+    function matchKey(match) {
+      return `${matchMode}:${match.rank}:${match.i}:${match.j}`;
+    }
+
+    function renderMatchContext(match) {
+      const docA = DATA.documentsA.find(doc => doc.doc_id === selectedPair.doc_a_id);
+      const docB = DATA.documentsB.find(doc => doc.doc_id === selectedPair.doc_b_id);
+      return `<div class="context-panel">
+        ${renderContextColumn('Corpus A surroundings', selectedPair.doc_a_id, docA?.short_name || selectedPair.doc_a_name, docA?.sentences || [], match.i)}
+        ${renderContextColumn('Corpus B surroundings', selectedPair.doc_b_id, docB?.short_name || selectedPair.doc_b_name, docB?.sentences || [], match.j)}
+      </div>`;
+    }
+
+    function renderContextColumn(title, docId, docName, sentences, centerIndex) {
+      const start = Math.max(0, centerIndex - contextRadius);
+      const end = Math.min(sentences.length - 1, centerIndex + contextRadius);
+      const rows = [];
+      for (let index = start; index <= end; index++) {
+        rows.push(`<div class="context-row ${index === centerIndex ? 'hit' : ''}">
+          <div class="context-index">[${index}]</div>
+          <div>${escapeHtml(sentences[index] || '')}</div>
+        </div>`);
+      }
+      return `<div class="context-col">
+        <div class="context-title">${escapeHtml(title)} · ${escapeHtml(docId)} · ${escapeHtml(docName)}</div>
+        ${rows.join('')}
+      </div>`;
     }
 
     function renderDocs() {

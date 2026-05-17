@@ -49,6 +49,8 @@ class BidirectionalCorpusPairwiseTests(unittest.TestCase):
             self.assertTrue(artifacts.synthesis_report_html.exists())
             self.assertTrue(artifacts.synthesis_csv.exists())
             self.assertTrue(artifacts.manifest_json.exists())
+            self.assertIn("Corpus A surroundings", artifacts.forward_report_html.read_text(encoding="utf-8"))
+            self.assertIn("click for ±3 context", artifacts.forward_report_html.read_text(encoding="utf-8"))
 
             manifest = json.loads(artifacts.manifest_json.read_text(encoding="utf-8"))
             self.assertEqual(manifest["label_a"], "SMDG")
